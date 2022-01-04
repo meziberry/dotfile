@@ -41,7 +41,7 @@ lint: build compile validate checkdoc longlines ## Run all linters
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	@rm -f emacs/radian.elc
+	@rm -f emacs/*.elc
 
 .PHONY: docker
 docker: ## Start a Docker shell; e.g. make docker VERSION=26

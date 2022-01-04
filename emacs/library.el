@@ -1,6 +1,7 @@
 ;; radian-lib.el --- -*- lexical-binding: t -*-
 
-;; Function tools
+;;
+;;; Some tiny function
 (defmacro exclude (cond &optional doc &rest args)
   "Exclude exps according to COND"
   (declare (doc-string 2)
@@ -24,7 +25,7 @@ list is returned as-is."
 
 (defun radian--setq-hook-fns (hooks rest &optional singles)
   (unless (or singles (= 0 (% (length rest) 2)))
-    (signal 'wrong-number-of-arguments (list #'evenp (length rest))))
+    (signal 'wrong-number-of-arguments (list #'cl-evenp (length rest))))
   (cl-loop with vars = (let ((args rest)
                              vars)
                          (while args
@@ -300,7 +301,7 @@ Like `cmd!', but allows you to change `current-prefix-arg' or pass arguments to
 COMMAND. This macro is meant to be used as a target for keybinds (e.g. with
 `define-key' or `map!')."
   (declare (doc-string 1) (pure t) (side-effect-free t))
-  (let ((docstring (if (stringp (car body)) (pop body))))
+  (let ((docstring (if (stringp (car args)) (pop args))))
     `(lambda (arg &rest _) ,docstring (interactive "P")
        (let ((current-prefix-arg (or ,prefix arg)))
          (,(if args
@@ -431,9 +432,9 @@ This is a wrapper around `eval-after-load' that:
               (cl-loop for next in (cdr package)
                        collect `(after! ,next ,@body))))
             ((memq p '(:and :all))
-             (dolist (next (reverse (cdr package)) (car body))
+             (dolist (next (reverse (cdr package)))
                (setq body `((after! ,next ,@body))))
-             (`(after! (:and ,@package) ,@body)))))))
+             `(after! (:and ,@package) ,@body))))))
 
 (defun radian--handle-load-error (e target path)
   (let* ((source (file-name-sans-extension target))

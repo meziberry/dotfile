@@ -58,6 +58,7 @@ loading the init-file twice if it were not for this variable.")
                                (file-name-directory (file-truename this-file)))
         "File containing main Radian configuration.
 This file is loaded by init.el.")
+
       (defvar library-file (concat (file-name-directory radian-lib-file) "library.el")
         "Library file")
 

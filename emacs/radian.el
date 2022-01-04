@@ -11,16 +11,10 @@
 ;; must recompile. Also, if the location of Radian changed, our
 ;; dotfile-finding functions are defined incorrectly and we must
 ;; recompile.
-
 (eval
- `(unless (equal
-           (list
-            (emacs-version)
-            radian-lib-file)
+ `(unless (equal (list (emacs-version) radian-lib-file)
            ',(eval-when-compile
-               (list
-                (emacs-version)
-                radian-lib-file)))
+               (list (emacs-version) radian-lib-file)))
     (throw 'stale-bytecode nil)))
 
 ;; Disable frequency of GC during init, and after init shall be set
@@ -38,8 +32,8 @@
 (defvar radian-debug-p (or (getenv-internal "DEBUG") init-file-debug)
   "If non-nil, Radian will log more.
 
-Use `radian-debug-mode' to toggle it. The --debug-init flag and setting the DEBUG
-envvar will enable this at startup.")
+Use `radian-debug-mode' to toggle it. The --debug-init flag and
+setting the DEBUG envvar will enable this at startup.")
 
 (defconst radian-interactive-p (not noninteractive)
   "If non-nil, Emacs is in interactive mode.")
@@ -283,7 +277,7 @@ unexpected ways."
            ;; (radian-pmacro ,@body)
            ;; deffer eval body untill func is called, through wrap it in
            ;; func definition.
-           (eval '(progn ,@body)))))))
+           (eval (progn ,@body) lexical-binding))))))
 
 (defmacro radian--run-hook (name)
   "Run the given local init HOOK.
@@ -666,15 +660,7 @@ this is meaning the package and config are enough stable as Core."
          :after-call
          '`((radian-load-aftercall ',leaf--name ',leaf--value) ,@leaf--body)))
 
-  ;; 2) require package when compile. defaultly
-  (setq leaf-keywords-before-protection
-        (plist-put
-         leaf-keywords-before-protection
-         :require-when-compile
-         '`((when byte-compile-current-file (require ,leaf--name)) ,@leaf--body)))
-  (setq leaf-defaults (plist-put leaf-defaults :require-when-compile t))
-
-  ;; 3) Do work for our pow! fow!
+  ;; 2) Do works for our pow! fow!
   ;; HACK customize :straight and :disable 's macroexpands
   ;; Let recipe sole. Recipe specified by user take precedence.
   (cl-pushnew '((eq leaf--key :straight)
@@ -701,6 +687,8 @@ this is meaning the package and config are enough stable as Core."
                         (if (alist-get leaf--name recipes)
                             (delq t recipes)
                           recipes))))))
+            (when byte-compile-current-file
+              (require leaf--name nil 'noerror))
             `(,@leaf--body))))
   ;; Let leaf to use straight by default.
   (setq leaf-defaults (plist-put leaf-defaults :straight t))
@@ -757,7 +745,8 @@ If PKG passed, require PKG before binding."
   :config
   (after! consult
     (defun +consult--line-a (&rest args)
-      "after `consult--line' copy the car of `consult--line-history' into `regexp-search-ring'"
+      "after `consult--line' copy the car of `consult--line-history'
+into `regexp-search-ring'"
       (ignore args)
       (when-let ((search (car consult--line-history)))
         (unless (string-equal search (car regexp-search-ring))
@@ -831,8 +820,8 @@ Set this to nil to disable incremental loading.")
 (defun radian-load-incrementally (packages &optional now)
   "Registers PACKAGES to be loaded incrementally.
 
-If NOW is non-nil, load PACKAGES incrementally, in `radian-incremental-idle-timer'
-intervals."
+If NOW is non-nil, load PACKAGES incrementally, in
+`radian-incremental-idle-timer' intervals."
   (if (not now)
       (appendq! radian-incremental-packages packages)
     (while packages
@@ -929,27 +918,6 @@ If this is a daemon session, load them all immediately instead."
   "Don't kill the scratch buffer. Meant for `kill-buffer-query-functions'."
   (not (eq (current-buffer) (radian-fallback-buffer))))
 
-(defun radian-highlight-non-default-indentation-h ()
-  "Highlight whitespace at odds with `indent-tabs-mode'.
-That is, highlight tabs if `indent-tabs-mode' is `nil', and highlight spaces at
-the beginnings of lines if `indent-tabs-mode' is `t'. The purpose is to make
-incorrect indentation in the current buffer obvious to you.
-
-Does nothing if `whitespace-mode' or `global-whitespace-mode' is already active
-or if the current buffer is read-only or not file-visiting."
-  (unless (or (eq major-mode 'fundamental-mode)
-              (bound-and-true-p global-whitespace-mode)
-              (null buffer-file-name))
-    (require 'whitespace)
-    (set (make-local-variable 'whitespace-style)
-         (cl-union (if indent-tabs-mode
-                       '(indentation)
-                     '(tabs tab-mark))
-                   (when whitespace-mode
-                     (remq 'face whitespace-active-style))))
-    (cl-pushnew 'face whitespace-style) ; must be first
-    (whitespace-mode +1)))
-
 ;;;; Prevent Emacs-provided Org from being loaded
 
 ;; Our real configuration for Org comes much later. Doing this now
@@ -1006,21 +974,22 @@ or if the current buffer is read-only or not file-visiting."
         w32-rwindow-modifier 'super)))
 
 ;; HACK Fixes Emacs' disturbing inability to distinguish C-i from TAB.
-(define-key key-translation-map [?\C-i]
-  (cmd! (if (let ((keys (this-single-command-raw-keys)))
-              (and keys
-                   (not (cl-position 'tab    keys))
-                   (not (cl-position 'kp-tab keys))
-                   (display-graphic-p)
-                   ;; Fall back if no <C-i> keybind can be found, otherwise
-                   ;; we've broken all pre-existing C-i keybinds.
-                   (let ((key
-                          (radian-lookup-key
-                           (vconcat (cl-subseq keys 0 -1) [C-i]))))
-                     (not (or (numberp key) (null key))))))
-            [C-i] [?\C-i])))
+(define-key
+ key-translation-map [?\C-i]
+ (cmd! (if (let ((keys (this-single-command-raw-keys)))
+             (and keys
+                  (not (cl-position 'tab    keys))
+                  (not (cl-position 'kp-tab keys))
+                  (display-graphic-p)
+                  ;; Fall back if no <C-i> keybind can be found, otherwise
+                  ;; we've broken all pre-existing C-i keybinds.
+                  (let ((key
+                         (radian-lookup-key
+                          (vconcat (cl-subseq keys 0 -1) [C-i]))))
+                    (not (or (numberp key) (null key))))))
+           [C-i] [?\C-i])))
 
-(pow! key-chord
+(pow key-chord
   :config
   (fn-quiet! #'key-chord-mode +1)
   (setq key-chord-two-keys-delay 0.25))
@@ -1076,11 +1045,18 @@ all hooks after it are ignored.")
 (defun radian/escape (&optional interactive)
   "Run `radian-escape-hook'."
   (interactive (list 'interactive))
-  (cond ((minibuffer-window-active-p (minibuffer-window))
+  (cond ((switch-to-buffer (window-buffer (active-minibuffer-window)))
          ;; quit the minibuffer if open.
-         (when interactive
-           (setq this-command 'abort-recursive-edit))
-         (abort-recursive-edit))
+         (cond
+          ((featurep 'delsel)
+           (progn
+             (eval-when-compile (require 'delsel))
+             (minibuffer-keyboard-quit)))
+          ;; Emacs 28 and later
+          ((fboundp 'abort-minibuffers)
+           (abort-minibuffers))
+          ;; Emacs 27 and earlier
+          (t (abort-recursive-edit))))
         ;; Run all escape hooks. If any returns non-nil, then stop there.
         ((run-hook-with-args-until-success 'radian-escape-hook))
         ;; don't abort macros
@@ -1422,7 +1398,7 @@ Displays BUFFER according to ALIST and PLIST."
       (shackle--display-buffer-popup-window buffer alist plist)))))
 
 ;; Package `swsw' provides lightway to navigate windows.
-(pow! swsw
+(pow swsw
   :straight (swsw :repo "https://git.sr.ht/~dsemy/swsw")
   :hook (radian-first-input-hook . swsw-mode)
   :chord (",," . swsw-select)
@@ -1504,7 +1480,7 @@ ourselves."
     input))
 
 ;;;; Complation supported by `vertico'
-(pow! vertico
+(pow vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
   :hook radian-first-input-hook
@@ -1531,7 +1507,7 @@ overrides `completion-styles' during company completion sessions.")
   (leaf-key "DEL" #'vertico-directory-delete-char 'vertico-map)) ;backspace key
 
 ;;;; Orderless
-(pow! orderless
+(pow orderless
   :after-call radian-first-input-hook
   :config
   (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
@@ -1580,7 +1556,7 @@ orderless."
   (set-face-attribute 'completions-first-difference nil :inherit nil))
 
 ;;;; Consult
-(pow! consult
+(pow consult
 
   :preface
   (pow! consult-dir
@@ -1662,7 +1638,7 @@ orderless."
               ("RET" . +vertico/crm-exit))))
 
 ;;;; Embark
-(pow! embark
+(pow embark
   :straight (embark :type git :host github :repo "oantolin/embark"
                     :files ("embark-consult.el" "embark.el" "embark.texi"
                             "avy-embark-collect.el"))
@@ -1691,12 +1667,12 @@ orderless."
   (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators))
 
 
-(fow! embark-consult
+(fow embark-consult
   :after embark consult
   :require t
   :config (add-hook 'embark-collect-mode-hook #'consult-preview-at-point-mode))
 
-(pow! marginalia
+(pow marginalia
 
   :hook radian-first-input-hook
   :bind (minibuffer-local-map ("M-A" . marginalia-cycle))
@@ -1708,7 +1684,7 @@ orderless."
             '(project-switch-to-buffer . buffer)
             '(project-switch-project . project-file)))
 
-(pow! wgrep
+(pow wgrep
   :commands wgrep-change-to-wgrep-mode
   :config (setq wgrep-auto-save-buffer t))
 
@@ -1750,7 +1726,7 @@ orderless."
 ;; Feature `saveplace' provides a minor mode for remembering the
 ;; location of point in each file you visit, and returning it there
 ;; when you find the file again.
-(fow! saveplace
+(fow saveplace
   :config
   (save-place-mode +1)
 
@@ -1763,7 +1739,7 @@ orderless."
         (apply func args)))))
 
 ;;;; Project
-(fow! project
+(fow project
   :init
 
   (setq project-switch-commands
@@ -2245,10 +2221,7 @@ permission."
   "Reverse the characters in the region from BEG to END.
 Interactively, reverse the characters in the current region."
   (interactive "*r")
-  (insert
-   (reverse
-    (delete-and-extract-region
-     beg end))))
+  (insert (reverse (delete-and-extract-region beg end))))
 
 ;; When filling paragraphs, assume that sentences end with one space
 ;; rather than two.
@@ -2384,6 +2357,26 @@ two inserted lines are the same."
 ;;;; Whitespace
 (fow! whitespace
   :init
+  (defun radian-highlight-non-default-indentation-h ()
+    "Highlight whitespace at odds with `indent-tabs-mode'.
+That is, highlight tabs if `indent-tabs-mode' is `nil', and highlight spaces at
+the beginnings of lines if `indent-tabs-mode' is `t'. The purpose is to make
+incorrect indentation in the current buffer obvious to you.
+
+Does nothing if `whitespace-mode' or `global-whitespace-mode' is already active
+or if the current buffer is read-only or not file-visiting."
+    (unless (or (eq major-mode 'fundamental-mode)
+                (bound-and-true-p global-whitespace-mode)
+                (null buffer-file-name))
+      (require 'whitespace)
+      (set (make-local-variable 'whitespace-style)
+           (cl-union (if indent-tabs-mode
+                         '(indentation)
+                       '(tabs tab-mark))
+                     (when whitespace-mode
+                       (remq 'face whitespace-active-style))))
+      (cl-pushnew 'face whitespace-style) ; must be first
+      (whitespace-mode +1)))
 
   (define-minor-mode radian-highlight-long-lines-mode
     "Minor mode for highlighting long lines."
@@ -2473,7 +2466,7 @@ invocation will kill the newline."
 ;; will be deleted rather than killed. (Otherwise, in both cases the
 ;; selection is deselected and the normal function of the key is
 ;; performed.)
-(fow! delsel :config (delete-selection-mode -1))
+(fow delsel :config (delete-selection-mode -1))
 
 ;;;; Undo/redo
 
@@ -3765,6 +3758,7 @@ was printed, and only have ElDoc display if one wasn't."
     :yield "yield"))
 
 (pow! lsp-dart
+  :straight treemacs
   :when (featurep! 'lsp-mode)
   :config
   (if IS-WINDOWS
@@ -4152,18 +4146,7 @@ Return either a string or nil."
       ;; `pkgbuild-mode'.
       (setq mode-line-process nil)
       (when (eq major-mode 'sh-mode)
-        (setq mode-name (capitalize (symbol-name sh-shell))))))
-
-  (fow! lsp-bash
-    :defer-config
-
-    ;; Only activate the Bash LSP server in Bash code, not all shell
-    ;; script code. It's not very helpful to get Bash syntax errors
-    ;; while editing Zsh code.
-    `(eval
-      (setf (lsp--client-activation-fn (gethash 'bash-ls lsp-clients))
-            (lambda (&rest _)
-              (memq sh-shell '(sh bash)))))))
+        (setq mode-name (capitalize (symbol-name sh-shell)))))))
 
 ;;;; Web
 ;; https://developer.mozilla.org/en-US/docs/web/HTML
@@ -6825,18 +6808,17 @@ bound dynamically before being used.")
 (appendq! default-frame-alist initial-frame-alist)
 
 (setq frame-title-format
-        '(""
-          (:eval
-           (if (and (bound-and-true-p org-roam-directory)
-                    (s-contains-p org-roam-directory (or buffer-file-name "")))
-               (replace-regexp-in-string
-                ".*/[0-9]*-?" "☰ "
-                (subst-char-in-string ?_ ?  buffer-file-name))
-             "%b"))
-          (:eval (format (if (buffer-modified-p)  " ◉ %s" "  ●  %s")
-                         (radian-project-name))))
+      '(""
+        (:eval
+         (if (eq major-mode 'org-mode)
+             (replace-regexp-in-string
+              ".*/[0-9]*-?" "☰ "
+              (subst-char-in-string ?_ ?  buffer-file-name))
+           "%b"))
+        (:eval (format (if (buffer-modified-p)  " ◉ %s" "  ●  %s")
+                       (radian-project-name))))
 
-        icon-title-format frame-title-format)
+      icon-title-format frame-title-format)
 
 ;; Allow you to resize frames however you want, not just in whole
 ;; columns. "The 80s called, they want their user interface back"
