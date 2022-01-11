@@ -687,11 +687,11 @@ this is meaning the package and config are enough stable as Core."
                         (if (alist-get leaf--name recipes)
                             (delq t recipes)
                           recipes))))))
-            (when byte-compile-current-file
-              (require leaf--name nil 'noerror))
+            (if byte-compile-current-file (require leaf--name nil 'noerror))
             `(,@leaf--body))))
   ;; Let leaf to use straight by default.
-  (setq leaf-defaults (plist-put leaf-defaults :straight t))
+  (setq leaf-defaults (plist-put leaf-defaults :straight t)
+        leaf-defaults (plist-put leaf-defaults :disabled nil))
 
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
@@ -958,17 +958,14 @@ If this is a daemon session, load them all immediately instead."
 ;;        Overriding keymaps - evil-make-overriding-map
 ;;        Global state keymap - evil-global-set-key
 
-(cond
+(eval-cond!
  (IS-MAC
   ;; mac-* variables are used by the special emacs-mac build of Emacs by
   ;; Yamamoto Mitsuharu, while other builds use ns-*.
   (setq mac-command-modifier      'super
-        ns-command-modifier       'super
         mac-option-modifier       'meta
-        ns-option-modifier        'meta
         ;; Free up the right option for character composition
-        mac-right-option-modifier 'none
-        ns-right-option-modifier  'none))
+        mac-right-option-modifier 'none))
  (IS-WINDOWS
   (setq w32-lwindow-modifier 'super
         w32-rwindow-modifier 'super)))
@@ -1657,11 +1654,12 @@ orderless."
         prefix-help-command #'embark-prefix-help-command)
 
   (defadvice! +vertico--embark-which-key-prompt-a (fn &rest args)
-    "Hide the which-key indicator immediately when using the completing-read prompter."
+    "Hide the which-key indicator immediately when using the
+completing-read prompter."
     :around #'embark-completing-read-prompter
     (which-key--hide-popup-ignore-command)
     (let ((embark-indicators
-           (remq #'embark-which-key-indicator embark-indicators)))
+           (remq 'embark-which-key-indicator embark-indicators)))
       (apply fn args)))
 
   (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators))
@@ -2012,8 +2010,7 @@ unquote it using a comma."
            (intern
             (concat (symbol-name defun-name)
                     "-other-window")))
-         (docstring (format "Edit file %s."
-                            full-filename))
+         (docstring (format "Edit file %s." full-filename))
          (docstring-other-window
           (format "Edit file %s, in another window."
                   full-filename))
@@ -2189,18 +2186,16 @@ permission."
 
 ;;;; recentf-mode
 (fow! recentf
-  :hook (radian-first-file-hook . recentf-mode)
-  ;; slience annoying message on startup.
-  :preface (fn-quiet! #'recentf-mode)
+  :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
   :defer-incrementally easymenu tree-widget timer
-  :custom (recentf-max-saved-items . 200)
+  :custom (recentf-max-saved-items . 100)
   :commands recentf-open-files
   ;; Set history-length longer
   :setq-default (history-length . 100)
   ;; The most sensible time to clean up your recent files list is when you quit
   ;; Emacs (unless this is a long-running daemon session).
   :setq `(recentf-auto-cleanup . ,(if (daemonp) 300 nil))
-  :config (add-hook 'kill-emacs-hook #'recentf-cleanup))
+  :config (add-hook 'kill-emacs-hook (lambda () (fn-quiet! #'recentf-cleanup))))
 
 ;;; MODULE {Editing}
 ;;;; Text formatting
@@ -2500,6 +2495,30 @@ invocation will kill the newline."
 
 (pow! undo-fu
   :hook (radian-first-buffer-hook . undo-fu-mode)
+  :preface
+  (pow! undo-fu-session
+    :hook (undo-fu-mode-hook . global-undo-fu-session-mode)
+    :config
+    (setq undo-fu-session-incompatible-files '("\\.gpg$" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
+
+    ;; HACK Fix #4993: we've advised `make-backup-file-name-1' to produced SHA1'ed
+    ;;      filenames to prevent file paths that are too long, so we force
+    ;;      `undo-fu-session--make-file-name' to use it instead of its own
+    ;;      home-grown overly-long-filename generator.
+    ;; TODO PR this upstream; should be a universal issue
+    (defadvice! +undo-fu-make-hashed-session-file-name-a (file)
+      :override #'undo-fu-session--make-file-name
+      (let ((backup-directory-alist `(("." . ,undo-fu-session-directory))))
+        (concat (make-backup-file-name-1 file)
+                (if undo-fu-session-compression ".gz" ".el"))))
+
+    ;; HACK Use the faster zstd to compress undo files instead of gzip
+    (when (executable-find "zstd")
+      (defadvice! +undo--append-zst-extension-to-file-name-a (filename)
+        :filter-return #'undo-fu-session--make-file-name
+        (if undo-fu-session-compression
+            (concat (file-name-sans-extension filename) ".zst")
+          filename))))
   :config
   ;; Increase undo history limits to reduce likelihood of data loss
   (setq undo-limit 400000           ; 400kb (default is 160kb)
@@ -2519,30 +2538,6 @@ invocation will kill the newline."
               map)
     :init-value nil
     :global t))
-
-(pow! undo-fu-session
-  :hook (undo-fu-mode-hook . global-undo-fu-session-mode)
-  :config
-  (setq undo-fu-session-incompatible-files '("\\.gpg$" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
-
-  ;; HACK Fix #4993: we've advised `make-backup-file-name-1' to produced SHA1'ed
-  ;;      filenames to prevent file paths that are too long, so we force
-  ;;      `undo-fu-session--make-file-name' to use it instead of its own
-  ;;      home-grown overly-long-filename generator.
-  ;; TODO PR this upstream; should be a universal issue
-  (defadvice! +undo-fu-make-hashed-session-file-name-a (file)
-    :override #'undo-fu-session--make-file-name
-    (let ((backup-directory-alist `(("." . ,undo-fu-session-directory))))
-      (concat (make-backup-file-name-1 file)
-              (if undo-fu-session-compression ".gz" ".el"))))
-
-  ;; HACK Use the faster zstd to compress undo files instead of gzip
-  (when (executable-find "zstd")
-    (defadvice! +undo--append-zst-extension-to-file-name-a (filename)
-      :filter-return #'undo-fu-session--make-file-name
-      (if undo-fu-session-compression
-          (concat (file-name-sans-extension filename) ".zst")
-        filename))))
 
 ;; Feature `bookmark' provides a way to mark places in a buffer. I
 ;; don't use it, but some other packages do.
@@ -2849,6 +2844,7 @@ and cannot run in."
 ;; s-expression level. It provides a Paredit compatibility layer.
 (pow! smartparens
   :hook (radian-first-buffer-hook . smartparens-global-mode)
+  :defun sp-message sp-region-ok-p
   :commands sp-pair sp-local-pair sp-with-modes sp-point-in-comment sp-point-in-string
   ;; markdown-mode lsp
   ;; radian--advice-lsp-mode-silence company-explicit-action-p company--should-begin
@@ -3071,7 +3067,7 @@ currently active.")
 ;;;; xref
 (fow! xref
   :custom
-  (xref-search-program . #'ripgrep)
+  (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
   (xref-show-definitions-function . #'xref-show-definitions-completing-read))
 
@@ -4186,8 +4182,7 @@ Return either a string or nil."
          ("\\.css\\'" . web-mode)
          ("\\.hbs\\'" . web-mode))
   ;; Use `web-mode' rather than `js-mode' for scripts.
-  :interpreter (("js" . web-mode)
-                ("node" . web-mode))
+  :interpreter (("js" . web-mode) ("node" . web-mode))
   :defer-config
 
   ;; Indent by two spaces by default. Compatibility with Prettier.
@@ -4258,7 +4253,6 @@ around the problem by hardcoding a special case for yanking based
 on the value of `this-command'. So, when buffer modifications
 happen in an unexpected (to `web-mode') way, we have to manually
 poke it. Otherwise the modified text remains unfontified."
-        (setq web-mode-fontification-off nil)
         (when (and web-mode-scan-beg web-mode-scan-end global-font-lock-mode)
           (save-excursion
             (font-lock-fontify-region web-mode-scan-beg web-mode-scan-end)))))))
@@ -4829,7 +4823,7 @@ messages."
 
   (defun +org-init-appearance-h ()
     "Configures the UI for `org-mode'."
-    (setq org-indirect-buffer-display #'current-window
+    (setq ;;org-indirect-buffer-display #'current-window
           org-eldoc-breadcrumb-separator " → "
           org-enforce-todo-dependencies t
           org-entities-user
@@ -4910,7 +4904,7 @@ messages."
       (when-let* ((context (org-element-context))
                   (path (org-element-property :path context)))
         (pcase (org-element-property :type context)
-          (type (format "Link: %s" (org-element-property :raw-link context))))))
+          (_ (format "Link: %s" (org-element-property :raw-link context))))))
 
     (set-ligatures! 'org-mode
       :name          "#+NAME:"
@@ -4966,7 +4960,7 @@ messages."
        (0.5 . org-upcoming-deadline)
        (0.0 . org-upcoming-distant-deadline))
      ;; Don't monopolize the whole frame just for the agenda
-     org-agenda-window-setup 'current-window
+     ;; org-agenda-window-setup 'current-window
      org-agenda-skip-unavailable-files t
      ;; Shift the agenda to show the previous 3 days and the next 7 days for
      ;; better context on your week. The past is less important than the future.
@@ -5004,6 +4998,9 @@ messages."
   (defvar +org-babel-native-async-langs '(python)
     "Languages that will use `ob-comint' instead of `ob-async' for `:async'.")
 
+  (eval-when-compile
+    (defvar ob-async-no-async-languages-alist)
+    (defvar +org-babel-mode-alist) )
   (defun +org-init-babel-h ()
     (setq org-src-preserve-indentation t  ; use native major-mode indentation
           org-src-tab-acts-natively t     ; we do this ourselves
@@ -5247,6 +5244,7 @@ I like:
     ;;      option in `org-capture's menu.
     (defadvice! +org--remove-customize-option-a (fn table title &optional prompt specials)
       :around #'org-mks
+      (ignore specials)
       (let ((keyboard-translate-table (make-char-table 'keyboard-translate-table)))
         (aset keyboard-translate-table ?\q ?\^g)
         (funcall fn table title prompt '(("q" "Abort")))))
@@ -5323,15 +5321,15 @@ relative to `org-directory', unless it is an absolute path."
           org-latex-prefer-user-labels t)
 
     `(eval
-     (fow! ox-pandoc
-       :when (executable-find "pandoc")
-       :after ox
-       :init
-       (add-to-list 'org-export-backends 'pandoc)
-       (setq org-pandoc-options
-             '((standalone . t)
-               (mathjax . t)
-               (variable . "revealjs-url=https://revealjs.com")))))
+      (fow! ox-pandoc
+        :when (executable-find "pandoc")
+        :after ox
+        :init
+        (add-to-list 'org-export-backends 'pandoc)
+        (setq org-pandoc-options
+              '((standalone . t)
+                (mathjax . t)
+                (variable . "revealjs-url=https://revealjs.com")))))
 
     (defadvice! +org--dont-trigger-save-hooks-a (fn &rest args)
       "Exporting and tangling trigger save hooks; inadvertantly triggering
@@ -5365,6 +5363,7 @@ mutating hooks on exported output, like formatters."
   (defvar +org-habit-graph-window-ratio 0.3
     "The ratio of the consistency graphs relative to the window width")
 
+  (eval-when-compile (require 'org-habit))
   (defun +org-init-habit-h ()
     (add-hook! 'org-agenda-mode-hook
       (defun +org-habit-resize-graph-h ()
@@ -5456,15 +5455,6 @@ With numerical argument N, show content up to level N."
       (run-hooks 'find-file-hook))
 
     (add-hook! 'org-agenda-finalize-hook
-      (defun +org-exclude-agenda-buffers-from-workspace-h ()
-        "Don't associate temporary agenda buffers with current workspace."
-        (when (and org-agenda-new-buffers
-                   (bound-and-true-p persp-mode)
-                   (not org-agenda-sticky))
-          (let (persp-autokill-buffer-on-remove)
-            (persp-remove-buffer org-agenda-new-buffers
-                                 (get-current-persp)
-                                 nil))))
       (defun +org-defer-mode-in-agenda-buffers-h ()
         "`org-agenda' opens temporary, incomplete org-mode buffers.
 I've disabled a lot of org-mode's startup processes for these invisible buffers
@@ -5483,7 +5473,6 @@ can grow up to be fully-fledged org-mode buffers."
       "Prevent temporarily opened agenda buffers from polluting recentf."
       :around #'org-get-agenda-file-buffer
       (let ((recentf-exclude (list (lambda (_file) t)))
-            (radian-inhibit-large-file-detection t)
             org-startup-indented
             org-startup-folded
             vc-handled-backends
@@ -5528,6 +5517,7 @@ can grow up to be fully-fledged org-mode buffers."
     (add-hook 'radian-delete-backward-functions
               #'+org-delete-backward-char-and-realign-table-maybe-h))
 
+  (exclude "WIP"
   (defun +org-init-popup-rules-h ()
     (set-popup-rules!
      '(("^\\*Org Links" :slot -1 :vslot -1 :size 2 :ttl 0)
@@ -5537,7 +5527,7 @@ can grow up to be fully-fledged org-mode buffers."
        ("^\\*Org Agenda"     :ignore t)
        ("^\\*Org Src"        :size 0.4  :quit nil :select t :autosave t :modeline t :ttl nil)
        ("^\\*Org-Babel")
-       ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.25 :quit nil :select t :autosave ignore))))
+       ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.25 :quit nil :select t :autosave ignore)))))
 
   (defun +org-init-protocol-h ()
     ;; TODO org-board or better link grabbing support
@@ -5618,24 +5608,24 @@ compelling reason, so..."
              #'+org-enable-auto-update-cookies-h
              #'+org-make-last-point-visible-h)
 
-  (add-hook! 'org-load-hook
-             #'+org-init-org-directory-h
-             #'+org-init-appearance-h
-             #'+org-init-agenda-h
-             #'+org-init-attachments-h
-             #'+org-init-babel-h
-             #'+org-init-babel-lazy-loader-h
-             #'+org-init-capture-defaults-h
-             #'+org-init-capture-frame-h
-             #'+org-init-custom-links-h
-             #'+org-init-export-h
-             #'+org-init-habit-h
-             #'+org-init-hacks-h
-             #'+org-init-keybinds-h
-             ;; #'+org-init-popup-rules-h
-             #'+org-init-protocol-h
-             #'+org-init-protocol-lazy-loader-h
-             #'+org-init-smartparens-h)
+  (with-eval-after-load 'org
+    (+org-init-org-directory-h)
+    (+org-init-appearance-h)
+    (+org-init-agenda-h)
+    (+org-init-attachments-h)
+    (+org-init-babel-h)
+    (+org-init-babel-lazy-loader-h)
+    (+org-init-capture-defaults-h)
+    (+org-init-capture-frame-h)
+    (+org-init-custom-links-h)
+    (+org-init-export-h)
+    (+org-init-habit-h)
+    (+org-init-hacks-h)
+    (+org-init-keybinds-h)
+    ;;+org-init-popup-rules-h
+    (+org-init-protocol-h)
+    (+org-init-protocol-lazy-loader-h)
+    (+org-init-smartparens-h))
 
   ;; (Re)activate eldoc-mode in org-mode a little later, because it disables
   ;; itself if started too soon (which is the case with `global-eldoc-mode').
@@ -5853,7 +5843,6 @@ be invoked before `org-mode-hook' is run."
 
 (pow! org-roam
   :straight (org-roam :host github :repo "org-roam/org-roam" :files (:defaults "extensions/*"))
-  :hook (org-load-hook . +org-init-roam-h)
   :preface
   ;; Set this to nil so we can later detect if the user has set custom values
   ;; for these variables. If not, default values will be set in the :config
@@ -5902,7 +5891,7 @@ the database. See `+org-init-roam-h' for the launch process."
     "Setup `org-roam' but don't immediately initialize its database.
 Instead, initialize it when it will be actually needed."
     (letf! ((#'org-roam-db-sync #'ignore))
-      (org-roam-db-autosync-enable))
+      (fn-quiet! #'org-roam-db-autosync-enable))
     (defadvice! +org-roam-try-init-db-a (&rest _)
       "Try to initialize org-roam database at the last possible safe moment.
 In case of failure, fail gracefully."
@@ -5922,6 +5911,7 @@ In case of failure, fail gracefully."
                              "To try reinitialize org-roam, run \"M-x org-roam-db-autosync-enable\"")))))
       (advice-remove 'org-roam-db-query #'+org-roam-try-init-db-a)
       (org-roam-db-sync)))
+  (eval-after-load 'org (+org-init-roam-h))
 
   :bind (radian-comma-keymap ("rc". org-roam-capture))
 
@@ -6236,6 +6226,7 @@ disable itself. Sad."
 
 ;; Package `magit-todo'
 (pow! magit-todos
+  :defun rxt--re-builder-switch-pcre-mode
   :commands magit-todos-mode magit-todos-list
   :after hl-todo)
 
@@ -6839,11 +6830,9 @@ bound dynamically before being used.")
     (scroll-bar-mode -1))
   (tool-bar-mode -1)
 
-  (when IS-MAC
-
+  (eval-when! IS-MAC
     (add-hook! 'after-make-frame-functions
       (defun radian--disable-menu-bar-again-on-macos (_)
-
         "Disable the menu bar again, because macOS is dumb.
 On macOS, for some reason you can't disable the menu bar once it
 appears, and also `menu-bar-mode' doesn't prevent the menu bar
@@ -6900,7 +6889,7 @@ turn it off again after creating the first frame."
 ;; its promtps are governed by the same rules and keybinds as the rest of Emacs.
 (setq use-dialog-box nil)
 (when (bound-and-true-p tooltip-mode) (tooltip-mode -1))
-(when IS-LINUX (setq x-gtk-use-system-tooltips nil))
+(eval-when! IS-LINUX (setq x-gtk-use-system-tooltips nil))
 
 ;; Expand the minibuffer to fit multi-line text displayed in the echo-area. This
 ;; doesn't look too great with direnv, however...
@@ -6911,7 +6900,7 @@ turn it off again after creating the first frame."
 (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
 
 ;;;; Fonts
-(defvar radian-font nil
+(defvar radian-font (font-spec :family "Microsoft Yahei")
   "The default font to use.
 Must be a `font-spec', a font object, an XFT font string, or an XLFD string.
 
@@ -7002,19 +6991,16 @@ font to that size. It's rarely a good idea to do so!")
   ;; height. I don't know why.
   (set-face-attribute 'default nil :height radian-font-size)
 
-  (cond
-   (radian-font
-    (if (or reload (daemonp)) (set-frame-font radian-font t t t))
-    ;; I avoid `set-frame-font' at startup because it is expensive; doing extra,
-    ;; unnecessary work we can avoid by setting the frame parameter directly.
-    (setf (alist-get 'font default-frame-alist)
-          (cond ((stringp radian-font)
-                 (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*" radian-font radian-font-size))
-                ((fontp radian-font)
-                 (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*"
-                         (font-get radian-font :family) radian-font-size))
-                ((signal 'wrong-type-argument (list '(fontp stringp) radian-font))))))
-   ((display-graphic-p) (setq font-use-system-font t))))
+  (if (or reload (daemonp)) (set-frame-font radian-font t t t))
+  ;; I avoid `set-frame-font' at startup because it is expensive; doing extra,
+  ;; unnecessary work we can avoid by setting the frame parameter directly.
+  (setf (alist-get 'font default-frame-alist)
+        (cond ((stringp radian-font)
+               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*" radian-font radian-font-size))
+              ((fontp radian-font)
+               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*"
+                       (font-get radian-font :family) radian-font-size))
+              ((signal 'wrong-type-argument (list '(fontp stringp) radian-font))))))
 
 ;;;; Mode line
 
@@ -7401,69 +7387,68 @@ the unwritable tidbits."
   "Return non-nil on displays that support 256 colors."
   (or (display-graphic-p) (= (tty-display-color-cells) 16777216)))
 
-(defun radian/change-theme ()
-  (interactive)
-  (let* ((theme-cons (car radian-theme-list))
-         (theme (car theme-cons))
-         (is-dark (cdr theme-cons))
-         (class '((class color) (min-colors 89)))
-         (green      (if (tcolor-p) "lime green" "#87af5f"))
-         (orange     (if (tcolor-p) "orange" "#d7875f"))
-         (red        (if (tcolor-p) "red" "firebrick"))
-         (purple     (if (tcolor-p) "orchid" "#d787d7"))
-         (yellow     (if (tcolor-p) "yellow" "gold"))
-         (pink       (if (tcolor-p) "deep pink" "hot pink"))
-         (fg         (if is-dark "#ECEFF4" "#37474F"))
-         (bg         (if is-dark "#2E3440" "#FFFFFF"))
-         (prompt     (if is-dark "violet" "red"))
-         (match      (if is-dark "cyan" "blue"))
-         (match2     (if is-dark "green" "#228b22"))
-         (highlight  (if is-dark "#3B4252" "#FAFAFA"))
-         (critical   (if is-dark "#EBCB8B" "#FF6F00"))
-         (salient    (if is-dark "#81A1C1" "#673AB7"))
-         (strong     (if is-dark "#ECEFF4" "#000000"))
-         (popout     (if is-dark "#D08770" "#FFAB91"))
-         (subtle     (if is-dark "#434C5E" "#ECEFF1"))
-         (faded      (if is-dark "#677691" "#B0BEC5")))
+(with-no-warnings
+  (defun radian/change-theme ()
+    (interactive)
+    (let* ((theme-cons (car radian-theme-list))
+           (theme (car theme-cons))
+           (is-dark (cdr theme-cons))
+           (class '((class color) (min-colors 89)))
+           (green      (if (tcolor-p) "lime green" "#87af5f"))
+           (orange     (if (tcolor-p) "orange" "#d7875f"))
+           (red        (if (tcolor-p) "red" "firebrick"))
+           (purple     (if (tcolor-p) "orchid" "#d787d7"))
+           (yellow     (if (tcolor-p) "yellow" "gold"))
+           (pink       (if (tcolor-p) "deep pink" "hot pink"))
+           (fg         (if is-dark "#ECEFF4" "#37474F"))
+           (bg         (if is-dark "#2E3440" "#FFFFFF"))
+           (prompt     (if is-dark "violet" "red"))
+           (match      (if is-dark "cyan" "blue"))
+           (match2     (if is-dark "green" "#228b22"))
+           (highlight  (if is-dark "#3B4252" "#FAFAFA"))
+           (critical   (if is-dark "#EBCB8B" "#FF6F00"))
+           (salient    (if is-dark "#81A1C1" "#673AB7"))
+           (strong     (if is-dark "#ECEFF4" "#000000"))
+           (popout     (if is-dark "#D08770" "#FFAB91"))
+           (subtle     (if is-dark "#434C5E" "#ECEFF1"))
+           (faded      (if is-dark "#677691" "#B0BEC5")))
 
-    (disable-theme theme)
-    (setq radian-theme-list (append (cdr radian-theme-list) (list theme-cons)))
-    (cond ((memq theme '(modus-vivendi modus-operandi))
-           (if is-dark
-               (setq modus-themes-vivendi-color-overrides
-                     `((bg-main . ,bg) (fg-unfocused . ,fg)))
-             (setq modus-themes-operandi-color-overrides
-                   `((bg-main . ,bg) (fg-unfocused . ,fg)))))
-          ((eq theme 'nano)
-           (setq nano-theme-light/dark (if is-dark 'dark 'light)))
-          (t))
-    (load-theme theme t)
+      (disable-theme theme)
+      (setq radian-theme-list (append (cdr radian-theme-list) (list theme-cons)))
+      (cond ((memq theme '(modus-vivendi modus-operandi))
+             (if is-dark
+                 (setq modus-themes-vivendi-color-overrides
+                       `((bg-main . ,bg) (fg-unfocused . ,fg)))
+               (setq modus-themes-operandi-color-overrides
+                     `((bg-main . ,bg) (fg-unfocused . ,fg)))))
+            (t))
+      (load-theme theme t)
 
-    ;; custom face.
-    (custom-theme-set-faces
-     theme
-     ;; whitespace-line
-     `(whitespace-line ((,class :background ,yellow :foreground ,purple)))
+      ;; custom face.
+      (custom-theme-set-faces
+       theme
+       ;; whitespace-line
+       `(whitespace-line ((,class :background ,yellow :foreground ,purple)))
 
-     ;; vertico
-     `(vertico-current ((,class :background ,subtle)))
+       ;; vertico
+       `(vertico-current ((,class :background ,subtle)))
 
-     ;; git-gutter
-     `(git-gutter:added ((,class :background ,green)))
-     `(git-gutter:deleted ((,class :background "red")))
-     `(git-gutter:modified ((,class :background ,popout)))
-     `(git-gutter:separator ((,class :background ,salient)))
-     `(git-gutter:unchanged ((,class :background ,purple)))
-     ;; git-gutter-fr
-     `(git-gutter-fr:added ((,class :background ,green)))
-     `(git-gutter-fr:deleted ((,class :background "red")))
-     `(git-gutter-fr:modified ((,class :background ,popout)))
+       ;; git-gutter
+       `(git-gutter:added ((,class :background ,green)))
+       `(git-gutter:deleted ((,class :background "red")))
+       `(git-gutter:modified ((,class :background ,popout)))
+       `(git-gutter:separator ((,class :background ,salient)))
+       `(git-gutter:unchanged ((,class :background ,purple)))
+       ;; git-gutter-fr
+       `(git-gutter-fr:added ((,class :background ,green)))
+       `(git-gutter-fr:deleted ((,class :background "red")))
+       `(git-gutter-fr:modified ((,class :background ,popout)))
 
-     ;; M-x prompt-face
-     `(minibuffer-prompt      ((,class (:foreground ,prompt))))
-     `(comint-highlight-input ((,class (:foreground ,green :bold t)))))
-    (enable-theme theme))
-  (radian-run-hooks 'radian-load-theme-hook))
+       ;; M-x prompt-face
+       `(minibuffer-prompt      ((,class (:foreground ,prompt))))
+       `(comint-highlight-input ((,class (:foreground ,green :bold t)))))
+      (enable-theme theme))
+    (radian-run-hooks 'radian-load-theme-hook)))
 
 (leaf-key "M-h" #'radian/change-theme)
 
@@ -7514,4 +7499,5 @@ the unwritable tidbits."
 ;; no-native-compile: t
 ;; outline-regexp: ";;;;* [^ 	\n]\\|("
 ;; sentence-end-double-space: nil
+;; byte-compile-warnings: (not make-local docstrings)
 ;; End:

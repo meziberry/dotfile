@@ -189,7 +189,7 @@ NAME, ARGLIST, and BODY are the same as `defun', `defun*', `defmacro', and
               (`defadvice `(progn (defadvice! ,@rest)
                                   (unwind-protect ,body (undefadvice! ,@rest))))
               ((or `defun `defun*)
-               `(cl-letf ((,(car rest) (symbol-function #',(car rest))))
+               `(cl-letf ((,(car rest) (symbol-function ',(car rest))))
                   (ignore ,(car rest))
                   ,(if (eq type 'defun*)
                        `(cl-labels ((,@rest)) ,body)
@@ -218,6 +218,7 @@ except that FORCE-P is no-nil."
         `(letf! ((standard-output (lambda (&rest _)))
                  (defun message (&rest _))
                  (defun load (file &optional noerror nomessage nosuffix must-suffix)
+                   (ignore nomessage)
                    (funcall load file noerror t nosuffix must-suffix))
                  (defun write-region (start end filename &optional append visit lockname mustbenew)
                    (unless visit (setq visit 'no-message))
@@ -232,6 +233,7 @@ except that FORCE-P is no-nil."
      (letf! ((standard-output (lambda (&rest _)))
              (defun message (&rest _))
              (defun load (file &optional noerror nomessage nosuffix must-suffix)
+               (ignore nomessage)
                (funcall load file noerror t nosuffix must-suffix))
              (defun write-region (start end filename &optional append visit lockname mustbenew)
                (unless visit (setq visit 'no-message))
@@ -244,17 +246,27 @@ COND is checked at compile/expansion time, allowing BODY to be omitted entirely
 when the elisp is byte-compiled. Use this for forms that contain expensive
 macros that could safely be removed at compile time."
   (declare (indent 2))
-  (if (eval cond)
-      then
-    (macroexp-progn body)))
+  (if (eval cond) then (macroexp-progn body)))
 
 (defmacro eval-when! (cond &rest body)
   "Expands to BODY if CONDITION is non-nil at compile/expansion time.
 See `eval-if!' for details on this macro's purpose."
   (declare (indent 1))
-  (when (eval cond)
-    (macroexp-progn body)))
+  (when (eval cond) (macroexp-progn body)))
 
+(defmacro eval-cond! (&rest args)
+  "ARGS is a list of (COND . BODY)
+Expands to BODY if COND is non-nil at compile/expansion time.
+See `eval-cond!' for details on this macro's purpose."
+  (declare (indent 1))
+  (if (consp args)
+      (let* ((clause (car args))
+             (rest (cdr args))
+             (cond (car clause))
+             (body (cdr clause)))
+        (if (and (consp clause) (eval cond))
+            (macroexp-progn body)
+          `(eval-cond! ,@rest)))))
 
 ;;;; Closure factories
 (defmacro fn! (arglist &rest body)
@@ -292,7 +304,7 @@ ARGLIST."
 A factory for quickly producing interaction commands, particularly for keybinds
 or aliases."
   (declare (doc-string 1) (pure t) (side-effect-free t))
-  (let ((docstring (if (stringp (car body)) (pop body))))
+  (let ((docstring (if (stringp (car body)) (pop body) "")))
     `(lambda (&rest _) ,docstring (interactive) ,@body)))
 
 (defmacro cmd!! (command &optional prefix &rest args)
