@@ -78,10 +78,8 @@ same arguments as `message'."
      (let ((inhibit-message (active-minibuffer-window)))
        (message
         ,(concat (propertize "RADIAN " 'face 'font-lock-comment-face)
-                 (when (bound-and-true-p radian--current-feature)
-                   (propertize
-                    (format "[%s] " radian--current-feature)
-                    'face 'warning))
+                 (propertize (format "[%s] " radian--current-feature)
+                             'face 'warning)
                  format-string)
         ,@args))))
 
@@ -193,7 +191,7 @@ NAME, ARGLIST, and BODY are the same as `defun', `defun*', `defmacro', and
                   (ignore ,(car rest))
                   ,(if (eq type 'defun*)
                        `(cl-labels ((,@rest)) ,body)
-                     `(cl-letf (((symbol-function #',(car rest))
+                     `(cl-letf (((symbol-function ',(car rest))
                                  (fn! ,(cadr rest) ,@(cddr rest))))
                         ,body))))
               (_

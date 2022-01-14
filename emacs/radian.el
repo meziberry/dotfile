@@ -207,7 +207,6 @@ For use with `radian-local-on-hook' in init.local.el."
 This is used to embed local init hook code directly into the
 init-file at the appropriate places during byte-compilation,
 without breaking macro-expansion.")
-
 ;; Idempotency.
 (setq radian--hook-contents nil)
 
@@ -274,10 +273,8 @@ unexpected ways."
        (add-hook! ',hook
          (defun ,func-name ()
            "Automatically-generated local hook function."
-           ;; (radian-pmacro ,@body)
-           ;; deffer eval body untill func is called, through wrap it in
-           ;; func definition.
-           (eval (progn ,@body) lexical-binding))))))
+           ;; (eval (prog1 nil ,@body) lexical-binding)
+           ,@body)))))
 
 (defmacro radian--run-hook (name)
   "Run the given local init HOOK.
@@ -360,18 +357,28 @@ hook directly into the init-file during byte-compilation."
 
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
+(if IS-WINDOWS
+    (progn
+      (set-clipboard-coding-system 'utf-16-le)
+      (set-selection-coding-system 'utf-16-le))
+  (set-selection-coding-system 'utf-8)
+  (set-next-selection-coding-system 'utf-8))
+(prefer-coding-system 'utf-8-unix)
 (set-language-environment "UTF-8")
+(set-default-coding-systems 'utf-8-unix)
+(set-terminal-coding-system 'utf-8-unix)
+(set-keyboard-coding-system 'utf-8-unix)
+(setq locale-coding-system 'utf-8-unix)
+;; Treat clipboard input as UTF-8 string first; compound text next, etc.
+(when (display-graphic-p)
+  (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING)))
 
 ;; Performance on Windows is considerably worse than elsewhere. We'll need
 ;; everything we can get.
 (when (boundp 'w32-get-true-file-attributes)
   (setq w32-get-true-file-attributes nil   ; decrease file IO workload
         w32-pipe-read-delay 0              ; faster ipc
-        w32-pipe-buffer-size (* 64 1024))  ; read more at a time (was 4K)
-  ;; The clipboard on Windows could be in another encoding (likely utf-16), so
-  ;; let Emacs/the OS decide what to use there.
-  (set-selection-coding-system 'utf-8)
-  (set-next-selection-coding-system 'utf-8))
+        w32-pipe-buffer-size (* 64 1024))) ; read more at a time (was 4K)
 
 ;; Adopt a sneaky garbage collection strategy of waiting until idle time to
 ;; collect; staving off the collector while the user is working.
@@ -432,8 +439,7 @@ hook directly into the init-file during byte-compilation."
 
 ;; Feature `url-http' is a library for making HTTP requests.
 (with-eval-after-load 'url-http
-  (eval-when-compile
-    (require 'url-http))
+  (eval-when-compile (require 'url-http))
 
   (defadvice! radian--no-query-on-http-kill
     (buffer)
@@ -603,33 +609,24 @@ binding the variable dynamically over the entire init-file."
 (defmacro pow! (name &rest args)
   "Like `leaf' with :disabled `featurep!'"
   (declare (indent 1))
-  (unless mini-p
-    (setq radian--current-feature name)
-    `(leaf ,name :disabled (not (featurep! ',name)) ,@args)))
+  (unless mini-p `(leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
 
-(defmacro fow! (name &rest args)
-  "Like `pow!' with :straight nil."
+(defmacro -ow! (name &rest args)
+  "Like `pow!' without :straight."
   (declare (indent 1))
-  (unless mini-p
-    (setq radian--current-feature name)
-    `(leaf ,name :disabled (not (featurep! ',name)) :straight nil ,@args)))
+  (unless mini-p `(leaf ,name :disabled (not (featurep! ',name)) ,@args)))
 
 (defmacro pow (name &rest args)
-  "Same to `fow', except enabled :straight."
-  (declare (indent 1)) (setq radian--current-feature name) `(leaf ,name ,@args))
+  "Same to `pow!', but `:disabled' is nil."
+  (declare (indent 1)) `(leaf ,name :disabled nil ,@args :straight t))
 
-(defmacro fow (name &rest args)
-  "Like `fow!' with :straight nil and :disabled nil implicitly.
-
- This block is out of control from disabled feature!. Usually, using
-this is meaning the package and config are enough stable as Core."
-  (declare (indent 1))
-  (setq radian--current-feature name) `(leaf ,name :straight nil ,@args))
+(defalias '-ow #'leaf)
+(put '-ow 'lisp-indent-function 1)
 
 (straight-use-package 'leaf)
 (straight-use-package '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz" :local-repo "leaf-keywords.el"))
 
-(pow leaf-keywords
+(-ow leaf-keywords
   :require t
   :config
 
@@ -660,7 +657,7 @@ this is meaning the package and config are enough stable as Core."
          :after-call
          '`((radian-load-aftercall ',leaf--name ',leaf--value) ,@leaf--body)))
 
-  ;; 2) Do works for our pow! fow!
+  ;; 2) Do works for our pow! -ow!
   ;; HACK customize :straight and :disable 's macroexpands
   ;; Let recipe sole. Recipe specified by user take precedence.
   (cl-pushnew '((eq leaf--key :straight)
@@ -689,9 +686,14 @@ this is meaning the package and config are enough stable as Core."
                           recipes))))))
             (if byte-compile-current-file (require leaf--name nil 'noerror))
             `(,@leaf--body))))
-  ;; Let leaf to use straight by default.
-  (setq leaf-defaults (plist-put leaf-defaults :straight t)
-        leaf-defaults (plist-put leaf-defaults :disabled nil))
+
+  ;; 3) Let `radian--current-feature' set in leaf--defaults.
+  (setq leaf-keywords-before-protection
+        (plist-put
+         leaf-keywords-before-protection
+         :loading
+         '(progn (setq radian--current-feature leaf--name) `,@leaf--body)))
+  (setq leaf-defaults (plist-put leaf-defaults :loading t))
 
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
@@ -702,9 +704,10 @@ this is meaning the package and config are enough stable as Core."
 ;; <https://github.com/raxod502/el-patch/pull/11>.
 (eval-when-compile (require 'el-patch))
 
-;; NOTE :bind imply (map @bds) => (map :package name @bds)
-;; Here :package imply `eval-after-load'. :bind-keymap imply `require'
-(fow leaf
+;; NOTE :bind imply (map @bds) => (map :package name @bds),
+;;       Here :package imply `eval-after-load'.
+;;      :bind-keymap imply `require' leaf--name.
+(-ow leaf
   :init/el-patch
   (defmacro leaf-key-bind-keymap (key kmap &optional keymap pkg)
     "Bind KEY to KMAP in KEYMAP (`global-map' if not passed).
@@ -772,6 +775,9 @@ into `regexp-search-ring'"
   :straight
   `(local-autoload :local-repo ,radian-local-autoload-dir :type nil :build (:not compile)))
 
+;;; MODULE {lisp}
+(pow radian-lisp :straight `(radian-lisp :local-repo ,radian-lisp-dir :type nil))
+
 
 ;;; MODULE {Radian-foundation}
 
@@ -795,7 +801,6 @@ into `regexp-search-ring'"
     (setq-local radian-inhibit-major-mode-post-hooks t)
     (radian-run-hooks (intern-soft (format "%s-local-vars-hook" major-mode)))))    ;; (format "after-%s-hook" major-mode)
 
-
 ;; If the user has disabled `enable-local-variables', then
 ;; `hack-local-variables-hook' is never triggered, so we trigger it at the end
 ;; of `after-change-major-mode-hook':
@@ -804,98 +809,97 @@ into `regexp-search-ring'"
   (unless enable-local-variables (radian-run-local-var-hooks-h)))
 
 ;;;; Incremental lazy-loading
-(setq radian--current-feature 'Increment)
-
-(defvar radian-incremental-first-idle-timer 2.0
-  "How long (in idle seconds) until incremental loading starts.
-
+(-ow incremental
+  :config
+  (defvar radian-incremental-first-idle-timer 2.0
+    "How long (in idle seconds) until incremental loading starts.
 Set this to nil to disable incremental loading.")
 
-(defvar radian-incremental-idle-timer 0.75
-  "How long (in idle seconds) in between incrementally loading packages.")
+  (defvar radian-incremental-idle-timer 0.75
+    "How long (in idle seconds) in between incrementally loading packages.")
 
-(defvar radian-incremental-load-immediately (daemonp)
-  "If non-nil, load all incrementally deferred packages immediately at startup.")
+  (defvar radian-incremental-load-immediately (daemonp)
+    "If non-nil, load all incrementally deferred packages immediately at startup.")
 
-(defun radian-load-incrementally (packages &optional now)
-  "Registers PACKAGES to be loaded incrementally.
+  (defun radian-load-incrementally (packages &optional now)
+    "Registers PACKAGES to be loaded incrementally.
 
 If NOW is non-nil, load PACKAGES incrementally, in
 `radian-incremental-idle-timer' intervals."
-  (if (not now)
-      (appendq! radian-incremental-packages packages)
-    (while packages
-      (let* ((gc-cons-threshold most-positive-fixnum)
-             (req (pop packages)))
-        (unless (featurep req)
-          (radian-log "Incrementally loading %s" req)
-          (condition-case-unless-debug e
-              (or (while-no-input
-                    ;; If `default-directory' is a directory that doesn't exist
-                    ;; or is unreadable, Emacs throws up file-missing errors, so
-                    ;; we set it to a directory we know exists and is readable.
-                    (let ((default-directory radian-emacs-dir)
-                          (inhibit-message t)
-                          file-name-handler-alist)
-                      (require req nil t))
-                    t)
-                  (push req packages))
-            (error
-             (message "Failed to load %S package incrementally, because: %s"
-                      req e)))
-          (if (not packages)
-              (radian-log "Finished incremental loading")
-            (run-with-idle-timer radian-incremental-idle-timer
-                                 nil #'radian-load-incrementally
-                                 packages t)
-            (setq packages nil)))))))
+    (if (not now)
+        (appendq! radian-incremental-packages packages)
+      (while packages
+        (let* ((gc-cons-threshold most-positive-fixnum)
+               (req (pop packages)))
+          (unless (featurep req)
+            (radian-log "Incrementally loading %s" req)
+            (condition-case-unless-debug e
+                (or (while-no-input
+                      ;; If `default-directory' is a directory that doesn't exist
+                      ;; or is unreadable, Emacs throws up file-missing errors, so
+                      ;; we set it to a directory we know exists and is readable.
+                      (let ((default-directory radian-emacs-dir)
+                            (inhibit-message t)
+                            file-name-handler-alist)
+                        (require req nil t))
+                      t)
+                    (push req packages))
+              (error
+               (message "Failed to load %S package incrementally, because: %s"
+                        req e)))
+            (if (not packages)
+                (radian-log "Finished incremental loading")
+              (run-with-idle-timer radian-incremental-idle-timer
+                                   nil #'radian-load-incrementally
+                                   packages t)
+              (setq packages nil)))))))
 
-(defun radian-load-packages-incrementally-h ()
-  "Begin incrementally loading packages in `radian-incremental-packages'.
+  (defun radian-load-packages-incrementally-h ()
+    "Begin incrementally loading packages in `radian-incremental-packages'.
 
 If this is a daemon session, load them all immediately instead."
-  (if radian-incremental-load-immediately
-      (mapc #'require (cdr radian-incremental-packages))
-    (when (numberp radian-incremental-first-idle-timer)
-      (run-with-idle-timer radian-incremental-first-idle-timer
-                           nil #'radian-load-incrementally
-                           (cdr radian-incremental-packages) t))))
+    (if radian-incremental-load-immediately
+        (mapc #'require (cdr radian-incremental-packages))
+      (when (numberp radian-incremental-first-idle-timer)
+        (run-with-idle-timer radian-incremental-first-idle-timer
+                             nil #'radian-load-incrementally
+                             (cdr radian-incremental-packages) t)))))
 
 ;;;; After-call  SYMBOLS | HOOKS
-(setq radian--current-feature 'Aftercall)
+(-ow aftercall
+  :config
+  (defvar radian--deferred-packages-alist '(t))
 
-(defvar radian--deferred-packages-alist '(t))
+  (defun radian-load-aftercall (name hooks)
+    (let ((fn (make-symbol (format "radian--after-call-%s-h" name))))
+      (fset fn
+            (lambda (&rest _)
+              (radian-log "Loading deferred package %s from %s" name fn)
+              (condition-case e
+                  ;; If `default-directory' is a directory that doesn't
+                  ;; exist or is unreadable, Emacs throws up file-missing
+                  ;; errors, so we set it to a directory we know exists and
+                  ;; is readable.
+                  (let ((default-directory radian-emacs-dir))
+                    (require name))
+                ((debug error)
+                 (message "Failed to load deferred package %s: %s" name e)))
+              (when-let (deferral-list (assq name radian--deferred-packages-alist))
+                (dolist (hook (cdr deferral-list))
+                  (advice-remove hook fn)
+                  (remove-hook hook fn))
+                (delq! deferral-list radian--deferred-packages-alist)
+                (unintern fn nil))))
 
-(defun radian-load-aftercall (name hooks)
-  (let ((fn (make-symbol (format "radian--after-call-%s-h" name))))
-    (fset fn
-          (lambda (&rest _)
-            (radian-log "Loading deferred package %s from %s" name fn)
-            (condition-case e
-                ;; If `default-directory' is a directory that doesn't
-                ;; exist or is unreadable, Emacs throws up file-missing
-                ;; errors, so we set it to a directory we know exists and
-                ;; is readable.
-                (let ((default-directory radian-emacs-dir))
-                  (require name))
-              ((debug error)
-               (message "Failed to load deferred package %s: %s" name e)))
-            (when-let (deferral-list (assq name radian--deferred-packages-alist))
-              (dolist (hook (cdr deferral-list))
-                (advice-remove hook fn)
-                (remove-hook hook fn))
-              (delq! deferral-list radian--deferred-packages-alist)
-              (unintern fn nil))))
+      (dolist (hook hooks)
+        (if (string-match-p "-\\(?:functions\\|hook\\)$" (symbol-name hook))
+            (add-hook hook fn)
+          (advice-add hook :before fn)))
 
-    (dolist (hook hooks)
-      (if (string-match-p "-\\(?:functions\\|hook\\)$" (symbol-name hook))
-          (add-hook hook fn)
-        (advice-add hook :before fn)))
-
-    (unless (assq name radian--deferred-packages-alist)
-      (push `(,name) radian--deferred-packages-alist))
-    (nconc (assq name radian--deferred-packages-alist)
-           `(,@hooks))))
+      (unless (assq name radian--deferred-packages-alist)
+        (push `(,name) radian--deferred-packages-alist))
+      (nconc (assq name radian--deferred-packages-alist)
+             `(,@hooks)))))
 
 ;;;; Switch buffer/windows/frame functions
 
@@ -1168,8 +1172,7 @@ Only do this once, unless AGAIN is non-nil."
                        profile-file
                        buf-name))))))))
 
-(defvar radian--env-setup-timer
-  (run-at-time 1 nil #'radian-env-setup)
+(defvar radian--env-setup-timer (run-at-time 1 nil #'radian-env-setup)
   "Timer used to run `radian-env-setup'.
 We (mostly) don't need environment variables to be set correctly
 during init, so deferring their processing saves some time at
@@ -1427,7 +1430,7 @@ Displays BUFFER according to ALIST and PLIST."
 ;; rather a whole sequence of them.) For instance, you can use C-x 1
 ;; to focus on a particular window, then return to your previous
 ;; layout with C-c left.
-(fow! winner
+(-ow! winner
   ;; undo/redo changes to Emacs' window layout
   :preface (defvar winner-dont-bind-my-keys t) ; I'll bind keys myself
   :hook radian-first-buffer-hook
@@ -1439,7 +1442,7 @@ Displays BUFFER according to ALIST and PLIST."
 
 ;; Feature `ibuffer' provides a more modern replacement for the
 ;; `list-buffers' command.
-(fow! ibuffer :bind (([remap list-buffers] . ibuffer)))
+(-ow! ibuffer :bind (([remap list-buffers] . ibuffer)))
 
 ;; Maximize buffer
 (defun toggle-maximize-buffer () "Maximize buffer"
@@ -1665,7 +1668,7 @@ completing-read prompter."
   (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators))
 
 
-(fow embark-consult
+(-ow embark-consult
   :after embark consult
   :require t
   :config (add-hook 'embark-collect-mode-hook #'consult-preview-at-point-mode))
@@ -1687,7 +1690,7 @@ completing-read prompter."
   :config (setq wgrep-auto-save-buffer t))
 
 ;;;; isearch
-(fow isearch
+(-ow isearch
   ;; use my prefer search workflow.
   :bind ((minibuffer-local-isearch-map
           ([?\t]      . isearch-complete-edit)
@@ -1724,7 +1727,7 @@ completing-read prompter."
 ;; Feature `saveplace' provides a minor mode for remembering the
 ;; location of point in each file you visit, and returning it there
 ;; when you find the file again.
-(fow saveplace
+(-ow saveplace
   :config
   (save-place-mode +1)
 
@@ -1737,7 +1740,7 @@ completing-read prompter."
         (apply func args)))))
 
 ;;;; Project
-(fow project
+(-ow project
   :init
 
   (setq project-switch-commands
@@ -2098,7 +2101,7 @@ unquote it using a comma."
 ;; Feature `auth-source' reads and writes secrets from files like
 ;; ~/.netrc for TRAMP and related packages, so for example you can
 ;; avoid having to type in a particular host's password every time.
-(fow! auth-source
+(-ow! auth-source
   :config
 
   (defvar radian--auth-source-blacklist-file
@@ -2185,7 +2188,7 @@ permission."
 (leaf-key* "s-x" #'radian-set-executable-permission)
 
 ;;;; recentf-mode
-(fow! recentf
+(-ow! recentf
   :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
   :defer-incrementally easymenu tree-widget timer
   :custom (recentf-max-saved-items . 100)
@@ -2325,7 +2328,7 @@ newline."
 ;; Feature `newcomment' provides commands for commenting an
 ;; uncommenting code, and editing comments.
 ;;;; Newcomment
-(fow! newcomment
+(-ow! newcomment
   :bind (([remap default-indent-new-line] . radian-continue-comment))
   :config
 
@@ -2350,7 +2353,7 @@ two inserted lines are the same."
 ;; Feature `whitespace' provides a minor mode for highlighting
 ;; whitespace in various special ways.
 ;;;; Whitespace
-(fow! whitespace
+(-ow! whitespace
   :init
   (defun radian-highlight-non-default-indentation-h ()
     "Highlight whitespace at odds with `indent-tabs-mode'.
@@ -2396,7 +2399,7 @@ or if the current buffer is read-only or not file-visiting."
 ;; Feature `outline' provides major and minor modes for collapsing
 ;; sections of a buffer into an outline-like format.
 ;;;; Outline
-(fow! outline
+(-ow! outline
   :config
   (setq-local outline-heading-alist
               '((";;; " . 1) (";;;; " . 2) (";;;;; " . 3)
@@ -2410,7 +2413,7 @@ or if the current buffer is read-only or not file-visiting."
   :blackout outline-minor-mode)
 
 ;;;; hide-show
-(fow! hideshow
+(-ow! hideshow
   :hook (prog-mode-hook . hs-minor-mode)
   :config
 
@@ -2461,11 +2464,11 @@ invocation will kill the newline."
 ;; will be deleted rather than killed. (Otherwise, in both cases the
 ;; selection is deselected and the normal function of the key is
 ;; performed.)
-(fow delsel :config (delete-selection-mode -1))
+(-ow delsel :config (delete-selection-mode -1))
 
 ;;;; Undo/redo
 
-(fow! repeat
+(-ow! repeat
   :init
   (defvar radian-repeat-exclude-commands
     '(meow-next meow-prev meow-left meow-right meow-block meow-line)
@@ -2479,7 +2482,7 @@ invocation will kill the newline."
         (setq last-repeatable-command repeat-previous-repeated-command))))
 
 ;; Feature `warnings' allows us to enable and disable warnings.
-(fow! warnings
+(-ow! warnings
   :require t
   :config
 
@@ -2541,7 +2544,7 @@ invocation will kill the newline."
 
 ;; Feature `bookmark' provides a way to mark places in a buffer. I
 ;; don't use it, but some other packages do.
-(fow! bookmark
+(-ow! bookmark
   :config
 
   (dolist (func '(bookmark-load bookmark-write-file))
@@ -2550,7 +2553,7 @@ invocation will kill the newline."
 ;; Feature `fileloop' provides the underlying machinery used to do
 ;; operations on multiple files, such as find-and-replace.
 (eval-when! (version<= "27" emacs-version)
-  (fow! fileloop
+  (-ow! fileloop
     :config
 
     (defadvice! radian--advice-fileloop-find-all-matches
@@ -2601,7 +2604,7 @@ buffer."
   (setq imenu-list-auto-resize t))
 
 ;;;; `cua' rectangle edit
-(fow! cua
+(-ow! cua
   :init (cua-selection-mode t)
   ;; disable `delete-selection-mode'
   :custom (cua-delete-selection . nil))
@@ -2622,7 +2625,7 @@ buffer."
         (set-window-configuration radian--ediff-saved-wconf)))))
 
 ;;;; server
-(fow! server
+(-ow! server
   :when (display-graphic-p)
   :after-call radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
@@ -2642,7 +2645,7 @@ buffer."
                                      "[/\\\\]node_modules")))
 
 ;;;; so-long
-(fow! so-long
+(-ow! so-long
   :hook (radian-first-file-hook . global-so-long-mode)
   :config
   (setq so-long-threshold 400) ; reduce false positives w/ larger threshold
@@ -2682,7 +2685,7 @@ buffer."
   (setq so-long-predicate #'radian-buffer-has-long-lines-p))
 
 ;;;; prettify
-(fow! prog-mode
+(-ow! prog-mode
   :init
   (defvar +ligatures-extras-in-modes t
     "List of major modes where extra ligatures should be enabled.
@@ -2775,7 +2778,7 @@ and cannot run in."
 ;; order to detect when the file visited by a buffer has changed, and
 ;; optionally reverting the buffer to match the file (unless it has
 ;; unsaved changes).
-(fow! autorevert
+(-ow! autorevert
   :init
   (defun radian--autorevert-silence ()
     "Silence messages from `auto-revert-mode' in the current buffer."
@@ -2829,7 +2832,7 @@ and cannot run in."
 
 ;;;; Automatic delimiter pairing
 
-(fow! paren
+(-ow! paren
   ;; highlight matching delimiters
   :hook (radian-first-buffer-hook . show-paren-mode)
   :config
@@ -2884,12 +2887,12 @@ and cannot run in."
   ;; Disable Smartparens in Org-related modes, since the keybindings
   ;; conflict.
 
-  (fow! org
+  (-ow! org
     :config
 
     (add-to-list 'sp-ignore-modes-list #'org-mode))
 
-  (fow! org-agenda
+  (-ow! org-agenda
     :config
 
     (add-to-list 'sp-ignore-modes-list #'org-agenda-mode))
@@ -2971,7 +2974,7 @@ and cannot run in."
 
 ;; Feature `abbrev' provides functionality for expanding user-defined
 ;; abbreviations. We prefer to use `yasnippet' instead, though.
-(fow! abbrev :blackout t)
+(-ow! abbrev :blackout t)
 
 ;; Package `yasnippet' allows the expansion of user-defined
 ;; abbreviations into fillable templates. The only reason we have it
@@ -2999,7 +3002,7 @@ and cannot run in."
   ;; completions menu rather than cancelling the snippet and moving
   ;; the cursor while leaving the completions menu on-screen in the
   ;; same location.
-  (fow! company
+  (-ow! company
 
     :config
 
@@ -3065,7 +3068,7 @@ currently active.")
 ;;; MODULE {IDE features}
 ;;;; Virtual environments
 ;;;; xref
-(fow! xref
+(-ow! xref
   :custom
   (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
@@ -3076,7 +3079,7 @@ currently active.")
 
   :hook ((prog-mode-hook text-mode-hook) . rainbow-delimiters-mode)
   :init
-  (fow! cc-mode :hook (c-mode-common-hook . rainbow-delimiters-mode))
+  (-ow! cc-mode :hook (c-mode-common-hook . rainbow-delimiters-mode))
   :config
   (setq rainbow-delimiters-max-face-count 3))
 
@@ -3478,7 +3481,7 @@ menu to disappear and then come back after `company-idle-delay'."
 ;; Feature `eldoc' provides a minor mode (enabled by default in Emacs
 ;; 25) which allows function signatures or other metadata to be
 ;; displayed in the echo area.
-(fow! eldoc
+(-ow! eldoc
   :require t
   :config
 
@@ -3569,12 +3572,12 @@ was printed, and only have ElDoc display if one wasn't."
                 (apply completing-read prompt collection args))))
       (apply orig-fun args)))
 
-  (fow lsp-ui-imenu
+  (-ow lsp-ui-imenu
     :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
 
   ;; Feature `lsp-ui-doc' from package `lsp-ui' displays documentation
   ;; in a child frame when point is on a symbol.
-  (fow lsp-ui-doc
+  (-ow lsp-ui-doc
     :config
     ;; https://github.com/emacs-lsp/lsp-ui/issues/414
     (add-to-list 'lsp-ui-doc-frame-parameters '(no-accept-focus . t))
@@ -3599,7 +3602,7 @@ was printed, and only have ElDoc display if one wasn't."
 
 ;; Feature `lisp-mode' provides a base major mode for Lisp languages,
 ;; and supporting functions for dealing with Lisp code.
-(fow! lisp-mode
+(-ow! lisp-mode
   :init
 
   (add-to-list 'safe-local-variable-values
@@ -3775,7 +3778,7 @@ was printed, and only have ElDoc display if one wasn't."
 
 ;; Feature `cc-mode' provides major modes for C, C++, Objective-C, and
 ;; Java.
-(fow! cc-mode
+(-ow! cc-mode
 
   :defer-config
 
@@ -3874,7 +3877,7 @@ See <https://github.com/dominikh/go-mode.el/issues/232>."
       (setq-local beginning-of-defun-function #'radian--go-beginning-of-defun)
       (setq-local end-of-defun-function #'radian--go-end-of-defun)))
 
-  (fow! lsp-ui
+  (-ow! lsp-ui
 
     :config
 
@@ -3935,7 +3938,7 @@ This works around an upstream bug; see
   ;; Feature `haskell' from package `haskell-mode' is a meta-feature
   ;; which includes many other features from the package, and also for
   ;; some reason is where `interactive-haskell-mode' is defined.
-  (fow! haskell
+  (-ow! haskell
 
     :defer-config
 
@@ -3947,7 +3950,7 @@ This works around an upstream bug; see
 
   ;; Feature `haskell-customize' from package `haskell-mode' defines the
   ;; user options for the package.
-  (fow! haskell-customize
+  (-ow! haskell-customize
     :config
 
     ;; Disable in-buffer underlining of errors and warnings, since we
@@ -3968,7 +3971,7 @@ This works around an upstream bug; see
 ;;;; Makefile
 
 ;; Feature `make-mode' provides major modes for editing Makefiles.
-(fow! make-mode
+(-ow! make-mode
   :blackout ((makefile-automake-mode . "Makefile")
              (makefile-gmake-mode . "Makefile")
              (makefile-makepp-mode . "Makefile")
@@ -4044,7 +4047,7 @@ https://github.com/jrblevin/markdown-mode/issues/328."
 ;; https://www.python.org/
 
 ;; Feature `python' provides a major mode for Python.
-(fow! python
+(-ow! python
   :config
 
   ;; The only consistent style.
@@ -4128,7 +4131,7 @@ Return either a string or nil."
 ;; https://www.gnu.org/software/bash/
 ;; http://www.zsh.org/
 
-(fow! sh-script
+(-ow! sh-script
 
   :defer-config
 
@@ -4152,7 +4155,7 @@ Return either a string or nil."
 ;; Feature `js' provides a major mode `js-mode' for JavaScript. We
 ;; don't use it (because `web-mode' is better), but we still configure
 ;; some of its variables because `json-mode' uses them.
-(fow! js
+(-ow! js
   :config
 
   ;; Default is 4, and nobody should indent JSON with four spaces.
@@ -4241,7 +4244,7 @@ enough for the moment."
       ;; auto-fill.
       (setq-local comment-start-skip "// *")))
 
-  (fow apheleia
+  (-ow apheleia
     :config
 
     (add-hook! 'apheleia-post-format-hook
@@ -4270,7 +4273,7 @@ poke it. Otherwise the modified text remains unfontified."
 (pow! dockerfile-mode)
 
 ;; This package include `gitconfig-mode' `gitignore-mode' `gitattributes-mode'
-(pow! git-modes :init (fow gitconfig-mode :mode "\\.gitconfig.*"))
+(pow! git-modes :init (-ow gitconfig-mode :mode "\\.gitconfig.*"))
 
 ;; Package `json-mode' provides a major mode for JSON.
 (pow! json-mode
@@ -4365,7 +4368,7 @@ This function calls `json-mode--update-auto-mode' to change the
 ;;;; Help
 
 ;; Feature `help' powers the *Help* buffer and related functionality.
-(fow! help
+(-ow! help
   :bind
   ;; Aviod visiting HELLO file accidentally.
   ("C-h h" . nil)
@@ -4478,7 +4481,7 @@ bizarre reason."
 
 ;; Feature `cus-edit' powers Customize buffers and related
 ;; functionality.
-(fow! cus-edit
+(-ow! cus-edit
   :config
 
   ;; Don't show the search box in Custom.
@@ -4490,7 +4493,7 @@ bizarre reason."
 ;; important! It also provides the major mode for the *scratch*
 ;; buffer, which is very similar but slightly different. Not as
 ;; important.
-(fow! elisp-mode
+(-ow! elisp-mode
   :config
   ;; <https://github.com/magnars/dash.el#fontification-of-special-variables>
   ;; Integrate dash.el
@@ -4638,7 +4641,7 @@ SYMBOL is as in `xref-find-definitions'."
 
 ;; Feature `find-func' provides the ability for you to locate the
 ;; definitions of Emacs Lisp functions and variables.
-(fow! find-func
+(-ow! find-func
 
   :config
 
@@ -4656,7 +4659,7 @@ SYMBOL is as in `xref-find-definitions'."
 ;;;;; Emacs Lisp byte-compilation
 
 ;; Feature `bytecomp' handles byte-compilation of Emacs Lisp code.
-(fow bytecomp
+(-ow bytecomp
   :config
 
   ;; Eliminate two warnings that are essentially useless for me. The
@@ -4710,7 +4713,7 @@ messages."
 ;;;;; Emacs Lisp linting
 ;; Feature `checkdoc' provides some tools for validating Elisp
 ;; docstrings against common conventions.
-(fow! checkdoc
+(-ow! checkdoc
   :init
   ;; Not sure why this isn't included by default.
   (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
@@ -4801,9 +4804,9 @@ messages."
   (add-hook 'mime-edit-mode-hook #'auto-fill-mode))
 
 ;;;; Organization
-;; Use `fow!' here because we already installed Org earlier.
+;; Use `-ow!' here because we already installed Org earlier.
 
-(fow! org
+(-ow! org
 
   :preface
   (pow! ox-pandoc)
@@ -4978,7 +4981,7 @@ messages."
           org-attach-use-inheritance t) ; inherit properties from parent nodes
 
     ;; Autoload all these commands that org-attach doesn't autoload itself
-    `(eval (fow! org-attach
+    `(eval (-ow! org-attach
              :commands (org-attach-new
                         org-attach-open
                         org-attach-open-in-emacs
@@ -5321,7 +5324,7 @@ relative to `org-directory', unless it is an absolute path."
           org-latex-prefer-user-labels t)
 
     `(eval
-      (fow! ox-pandoc
+      (-ow! ox-pandoc
         :when (executable-find "pandoc")
         :after ox
         :init
@@ -5651,7 +5654,7 @@ compelling reason, so..."
         org-re-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js")
 
   :config
-  (fow! org-appear
+  (-ow! org-appear
     :hook (org-mode-hook . org-appear-mode)
     :config
     (setq org-appear-autoemphasis t
@@ -5661,7 +5664,7 @@ compelling reason, so..."
     ;; needs to be run after other hooks have acted.
     (run-at-time nil nil #'org-appear--set-elements))
 
-  (fow! org-superstar
+  (-ow! org-superstar
     :hook (org-mode-hook . org-superstar-mode)
     :config
     (setq
@@ -5756,7 +5759,7 @@ This runs `org-insert-heading' with
 
 ;; Feature `org-indent' provides an alternative view for Org files in
 ;; which sub-headings are indented.
-(fow! org-indent
+(-ow! org-indent
 
   :init
 
@@ -5764,7 +5767,7 @@ This runs `org-insert-heading' with
 ;; Feature `org-agenda' from package `org' provides the agenda view
 ;; functionality, which allows for collating TODO items from your Org
 ;; files into a single buffer.
-(fow! org-agenda
+(-ow! org-agenda
 
   :config
 
@@ -5799,7 +5802,7 @@ This makes the behavior of `find-file' more reasonable."
   (setq org-agenda-dim-blocked-tasks 'invisible))
 ;; Feature `org-clock' from package `org' provides the task clocking
 ;; functionality.
-(fow! org-clock
+(-ow! org-clock
   ;; We have to autoload these functions in order for the below code
   ;; that enables clock persistence without slowing down startup to
   ;; work.
@@ -5982,7 +5985,7 @@ non-nil value to enable trashing for file operations."
   (advice-remove #'list-directory #'radian--use-gls-for-list-directory))
 
 ;; Feature `dired' provides a simplistic filesystem manager in Emacs.
-(fow! dired
+(-ow! dired
 
   :bind (dired-mode-map
          ;; This binding is way nicer than ^. It's inspired by
@@ -6048,7 +6051,7 @@ the problematic case.)"
   ;; function.)
   (setq dired-auto-revert-buffer t))
 
-(fow! dired-x
+(-ow! dired-x
 
   :bind (;; Bindings for jumping to the current directory in Dired.
          ("C-x C-j" . dired-jump)
@@ -6069,14 +6072,14 @@ are probably not going to be installed."
 
 
 ;; find-name-dired find stuff from different directory.
-(fow! find-dired
+(-ow! find-dired
   :init (setq find-ls-option '("-print0 | xargs -0 ls -ld" . "-ld")))
 
 ;;;; Terminal emulator
 
 ;; Feature `term' provides a workable, though slow, terminal emulator
 ;; within Emacs.
-(fow! term
+(-ow! term
   :bind (;; Allow usage of more commands from within the terminal.
          term-raw-map
          ("M-x" . execute-extended-command)
@@ -6090,11 +6093,11 @@ are probably not going to be installed."
 ;; Disable VC. This improves performance and disables some annoying
 ;; warning messages and prompts, especially regarding symlinks. See
 ;; https://stackoverflow.com/a/6190338/3538165.
-(exclude ";" (fow! vc-hooks :config (setq vc-handled-backends nil)))
+(exclude ";" (-ow! vc-hooks :config (setq vc-handled-backends nil)))
 
 ;; Feature `smerge-mode' provides an interactive mode for visualizing
 ;; and resolving Git merge conflicts.
-(fow! smerge-mode :blackout t)
+(-ow! smerge-mode :blackout t)
 
 ;; Package `transient' is the interface used by Magit to display
 ;; popups.
@@ -6198,7 +6201,7 @@ as argument."
 
 ;; Feature `magit-diff' from package `magit' handles all the stuff
 ;; related to interactive Git diffs.
-(fow! magit-diff
+(-ow! magit-diff
   :config
 
   (defadvice! radian--magit-diff-revert-before-smerge (buf _pos)
@@ -6217,7 +6220,7 @@ disable itself. Sad."
 
 ;; Feature `git-commit' from package `magit' provides the commit
 ;; message editing capabilities of Magit.
-(fow! git-commit
+(-ow! git-commit
   :config
 
   ;; Max length for commit message summary is 50 characters as per
@@ -6233,7 +6236,7 @@ disable itself. Sad."
 ;; Package `emacsql-sqlite' is a dependency of Forge which is used to
 ;; interact with the SQLite database that Forge uses to keep track of
 ;; information about pull requests.
-(fow! emacsql-sqlite
+(-ow! emacsql-sqlite
 
   :init
 
@@ -6261,7 +6264,7 @@ anything significant at package load time) since it breaks CI."
 
 ;; Feature `forge-core' from package `forge' implements the core
 ;; functionality.
-(fow! forge-core
+(-ow! forge-core
 
   :config
 
@@ -6361,7 +6364,7 @@ changes, which means that `git-gutter' needs to be re-run.")
                 (unless (file-remote-p buffer-file-name)
                   (git-gutter)))))))))
 
-  (fow! autorevert
+  (-ow! autorevert
     :config
 
     (add-hook! 'after-revert-hook
@@ -6370,7 +6373,7 @@ changes, which means that `git-gutter' needs to be re-run.")
         (when git-gutter-mode
           (git-gutter)))))
 
-  (fow! apheleia
+  (-ow! apheleia
     :config
 
     (add-hook! 'apheleia-post-format-hook
@@ -6405,7 +6408,7 @@ changes, which means that `git-gutter' needs to be re-run.")
     :after git-gutter
     :init
 
-    (fow! git-gutter
+    (-ow! git-gutter
       :config
 
       ;; This function is only available when Emacs is built with
@@ -6444,7 +6447,7 @@ Instead, display simply a flat colored region in the fringe."
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
 (exclude "WIP"
-(fow! browse-url
+(-ow! browse-url
 
   :init
 
@@ -6707,7 +6710,7 @@ bound dynamically before being used.")
   (eval-after-load 'info '(define-key Info-mode-map "o" #'link-hint-open-link)))
 
 ;;;; hl-line
-(fow! hl-line
+(-ow! hl-line
   ;; Highlights the current line
   :hook (radian-first-buffer-hook . global-hl-line-mode)
   :init
@@ -6750,7 +6753,7 @@ bound dynamically before being used.")
         (hl-line-mode +1)))))
 
 ;;;; pulse.el
-(fow! pulse
+(-ow! pulse
   :doc "Built-in. Pulse the crrent line"
   :config
   (defun pulse-line (&rest _)
@@ -6970,7 +6973,7 @@ font to that size. It's rarely a good idea to do so!")
         ;; 汉字Unicode范围
         (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend))))
 
-  ;; Set CJK font. but upper 'han setting is suffice for me.
+  ;; ;; Set CJK font. but upper 'han setting is suffice for me.
   ;; (dolist (script '(kana han cjk-misc bopomofo))
   ;;   (set-fontset-font (frame-parameter nil 'font)
   ;;                     script (font-spec :family "<CJK font name>")))
@@ -7011,7 +7014,7 @@ font to that size. It's rarely a good idea to do so!")
 
 ;; The following code customizes the mode line to something like:
 ;; NORMAL [*] radian.el   18% (18,0)     radian:develop*  (Emacs-Lisp)
-
+(exclude "not-useing"
 (defun radian-mode-line-buffer-modified-status ()
   "Return a mode line construct indicating buffer modification status.
 This is [*] if the buffer has been modified and whitespace
@@ -7023,7 +7026,7 @@ modified.) It is shown in the same color as the buffer name, i.e.
             (buffer-file-name))
        "[*]"
      "   ")
-   'face 'mode-line-buffer-id))
+   'face 'mode-line-buffer-id)))
 
 ;; Normally the buffer name is right-padded with whitespace until it
 ;; is at least 12 characters. This is a waste of space, so we
@@ -7051,7 +7054,7 @@ spaces."
     (cond
      ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
       (setf (nth index mode-line-modes) ""))
-     ((equal "(" e) (setf (nth index mode-line-modes) "-#"))
+     ((equal "(" e) (setf (nth index mode-line-modes) "->"))
      ((equal ")" e) (setf (nth index mode-line-modes) ""))
      (t))
     (setq index (1+ index))))
@@ -7075,16 +7078,14 @@ spaces."
     (vc-mode vc-mode)
     " "
     mode-line-modes
-    "--"
+    "<-"
     mode-line-misc-info
-    "%-")
+    "-")
   "Composite mode line construct to be shown left-aligned."
   :type 'sexp)
 
 (defcustom radian-mode-line-right          ;⊙_⚆⚈☭
-  '("%-----------------------------------------------------------------------\
------------------------------------------------------------------------------\
----------------------------------------------------------------------------")
+  '("")
   "Composite mode line construct to be shown right-aligned."
   :type 'sexp)
 
@@ -7107,20 +7108,25 @@ spaces."
   (interactive)
   (insert "\u000c\n"))
 
-(defun xah-show-formfeed-as-line ()
-  "Display the formfeed ^L char as line.
-URL `http://ergoemacs.org/emacs/emacs_form_feed_section_paging.html'
-Version 2018-08-30"
+(defun xah-show-formfeed-as-line (&optional frame)
+  "Display the formfeed ^L char as line."
   (interactive)
-  ;; 2016-10-11 thanks to Steve Purcell's page-break-lines.el
-  (progn
-    (when (not buffer-display-table)
-      (setq buffer-display-table (make-display-table)))
-    (aset buffer-display-table ?\^L
-          (vconcat (make-list 70 (make-glyph-code ?─ 'font-lock-comment-face))))
-    (redraw-frame)))
+  (letf! ((defun pretty-formfeed-line (window)
+            (with-current-buffer (window-buffer window)
+              (with-selected-window window
+                (when (not buffer-display-table)
+                  (setq buffer-display-table (make-display-table)))
+                (aset buffer-display-table ?\^L
+                      (vconcat (make-list 70 (make-glyph-code ?─ 'font-lock-comment-face))))
+                (redraw-frame)))))
+    (unless (minibufferp)
+      (mapc 'pretty-formfeed-line (window-list frame 'no-minibuffer)))))
 
-(add-hook 'window-state-change-hook #'xah-show-formfeed-as-line)
+(dolist (hook '(window-configuration-change-hook
+                window-size-change-functions
+                after-setting-font-hook
+                display-line-numbers-mode-hook))
+  (add-hook hook #'xah-show-formfeed-as-line))
 
 ;;; Startup
 
@@ -7187,7 +7193,7 @@ Version 2018-08-30"
 ;; based on the value of `echo-keystrokes', and then later overrides
 ;; `echo-keystrokes' to the value of this internal variable,
 ;; effectively overwriting our configuration here. Stop that behavior.
-(fow! which-key :config (setq which-key-echo-keystrokes echo-keystrokes))
+(-ow! which-key :config (setq which-key-echo-keystrokes echo-keystrokes))
 
 (after! comint
   (setq comint-prompt-read-only t
@@ -7234,10 +7240,10 @@ If RETURN-P, return the message as a string instead of displaying it."
              (float-time (time-subtract (current-time) before-init-time))))))
 
 ;;;; simple
-(fow simple :bind ("C-x C-M-t" . transpose-regions))
+(-ow simple :bind ("C-x C-M-t" . transpose-regions))
 
 ;;;; savehist for session
-(fow! savehist
+(-ow! savehist
   ;; persist variables across sessions
   :defer-incrementally custom
   :hook radian-first-input-hook
@@ -7285,11 +7291,11 @@ the unwritable tidbits."
 ;; We should only get here if init was successful. If we do,
 ;; byte-compile this file asynchronously in a subprocess using the
 ;; Radian Makefile. That way, the next startup will be fast(er).
-(exclude "FIXME: void error" (run-with-idle-timer 1 nil #'radian-byte-compile))
+(exclude "NOTE: call manually" (run-with-idle-timer 1 nil #'radian-byte-compile))
 
 
 ;;; Theme configuration.
-(fow modus-themes
+(-ow modus-themes
   :init
   (setq
    modus-themes-italic-constructs t
@@ -7382,10 +7388,7 @@ the unwritable tidbits."
 ;;;; change theme and customize face.
 (defvar radian-theme-list '((modus-vivendi . t) (modus-operandi . nil))
   "Theme sequence of changing. `(THEME-NAME . IS-DARK-THEME)'")
-
-(defun tcolor-p ()
-  "Return non-nil on displays that support 256 colors."
-  (or (display-graphic-p) (= (tty-display-color-cells) 16777216)))
+(setq radian-theme-list '((nano . t) (nano . nil)))
 
 (with-no-warnings
   (defun radian/change-theme ()
@@ -7394,12 +7397,6 @@ the unwritable tidbits."
            (theme (car theme-cons))
            (is-dark (cdr theme-cons))
            (class '((class color) (min-colors 89)))
-           (green      (if (tcolor-p) "lime green" "#87af5f"))
-           (orange     (if (tcolor-p) "orange" "#d7875f"))
-           (red        (if (tcolor-p) "red" "firebrick"))
-           (purple     (if (tcolor-p) "orchid" "#d787d7"))
-           (yellow     (if (tcolor-p) "yellow" "gold"))
-           (pink       (if (tcolor-p) "deep pink" "hot pink"))
            (fg         (if is-dark "#ECEFF4" "#37474F"))
            (bg         (if is-dark "#2E3440" "#FFFFFF"))
            (prompt     (if is-dark "violet" "red"))
@@ -7412,42 +7409,51 @@ the unwritable tidbits."
            (popout     (if is-dark "#D08770" "#FFAB91"))
            (subtle     (if is-dark "#434C5E" "#ECEFF1"))
            (faded      (if is-dark "#677691" "#B0BEC5")))
-
-      (disable-theme theme)
       (setq radian-theme-list (append (cdr radian-theme-list) (list theme-cons)))
-      (cond ((memq theme '(modus-vivendi modus-operandi))
-             (if is-dark
-                 (setq modus-themes-vivendi-color-overrides
-                       `((bg-main . ,bg) (fg-unfocused . ,fg)))
-               (setq modus-themes-operandi-color-overrides
-                     `((bg-main . ,bg) (fg-unfocused . ,fg)))))
-            (t))
-      (load-theme theme t)
 
-      ;; custom face.
-      (custom-theme-set-faces
-       theme
-       ;; whitespace-line
-       `(whitespace-line ((,class :background ,yellow :foreground ,purple)))
+      (letf!
+        (defun tinker-theme (theme)
+          (custom-theme-set-faces
+           theme
+           ;; whitespace-line
+           `(whitespace-line ((,class :background "yellow" :foreground "purple")))
 
-       ;; vertico
-       `(vertico-current ((,class :background ,subtle)))
+           ;; vertico
+           `(vertico-current ((,class :background ,subtle)))
 
-       ;; git-gutter
-       `(git-gutter:added ((,class :background ,green)))
-       `(git-gutter:deleted ((,class :background "red")))
-       `(git-gutter:modified ((,class :background ,popout)))
-       `(git-gutter:separator ((,class :background ,salient)))
-       `(git-gutter:unchanged ((,class :background ,purple)))
-       ;; git-gutter-fr
-       `(git-gutter-fr:added ((,class :background ,green)))
-       `(git-gutter-fr:deleted ((,class :background "red")))
-       `(git-gutter-fr:modified ((,class :background ,popout)))
+           ;; git-gutter
+           `(git-gutter:added ((,class :background "green")))
+           `(git-gutter:deleted ((,class :background "red")))
+           `(git-gutter:modified ((,class :background ,popout)))
+           `(git-gutter:separator ((,class :background ,salient)))
+           `(git-gutter:unchanged ((,class :background "purple")))
+           ;; git-gutter-fr
+           `(git-gutter-fr:added ((,class :background "green")))
+           `(git-gutter-fr:deleted ((,class :background "red")))
+           `(git-gutter-fr:modified ((,class :background ,popout)))
 
-       ;; M-x prompt-face
-       `(minibuffer-prompt      ((,class (:foreground ,prompt))))
-       `(comint-highlight-input ((,class (:foreground ,green :bold t)))))
-      (enable-theme theme))
+           ;; M-x prompt-face
+           `(minibuffer-prompt      ((,class (:foreground ,prompt))))
+           `(comint-highlight-input ((,class (:foreground "green" :bold t)))))
+          (enable-theme theme))
+
+        (cond ((memq theme '(modus-vivendi modus-operandi))
+               (if is-dark
+                   (setq modus-themes-vivendi-color-overrides
+                         `((bg-main . ,bg) (fg-unfocused . ,fg)))
+                 (setq modus-themes-operandi-color-overrides
+                       `((bg-main . ,bg) (fg-unfocused . ,fg))))
+               (disable-theme theme)
+               (load-theme theme t)
+               (tinker-theme theme))
+              ((eq theme 'nano)
+               (if (eq (car custom-enabled-themes) 'nano)
+                   (nano-theme-toggle)
+                 (load-theme theme t)))
+              (t
+               (disable-theme theme)
+               (load-theme theme t)
+               (tinker-theme theme)))))
     (radian-run-hooks 'radian-load-theme-hook)))
 
 (leaf-key "M-h" #'radian/change-theme)
