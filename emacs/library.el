@@ -199,6 +199,40 @@ NAME, ARGLIST, and BODY are the same as `defun', `defun*', `defmacro', and
                  (setq type (list 'symbol-function type)))
                (list 'cl-letf (list (cons type rest)) body)))))))
 
+(defmacro regx-quiet! (regexps &rest body)
+  "Silencing any messages that match REGEXPS, execute BODY.
+REGEXPS is a list of strings; if `message' would display a
+message string (not including the trailing newline) matching any
+element of REGEXPS, nothing happens. The REGEXPS need not match
+the entire message; include ^ and $ if necessary. REGEXPS may
+also be a single string."
+  (declare (indent 1))
+  (let ((regexps-sym (cl-gensym "regexps")))
+    `(let ((,regexps-sym ,regexps))
+       (when (stringp ,regexps-sym)
+         (setq ,regexps-sym (list ,regexps-sym)))
+       (letf! ((defun message (format &rest args)
+                 (let ((str (apply #'format format args)))
+                   ;; Can't use an unnamed block because during
+                   ;; byte-compilation, some idiot loads `cl', which
+                   ;; sticks an advice onto `dolist' that makes it
+                   ;; behave like `cl-dolist' (i.e., wrap it in
+                   ;; another unnamed block) and therefore breaks
+                   ;; this code.
+                   (cl-block done
+                     (dolist (regexp ,regexps-sym)
+                       (when (or (null regexp)
+                                 (string-match-p regexp str))
+                         (cl-return-from done)))
+                     (funcall message "%s" str)))))
+         ,@body))))
+
+(defun fn-quiet! (func &rest args)
+  "Invoke FUNC with ARGS, silencing all messages.
+This is an `:around' advice for many different functions."
+  (cl-letf (((symbol-function #'message) #'ignore))
+    (apply func args)))
+
 (defmacro quiet! (&rest forms)
   "Run FORMS without generating any output.
 
@@ -222,21 +256,6 @@ except that FORCE-P is no-nil."
                    (unless visit (setq visit 'no-message))
                    (funcall write-region start end filename append visit lockname mustbenew)))
            ,@forms))))
-
-(defmacro quiet*! (&rest forms)
-  "Forced run FORMS without any output messages"
-  (declare (indent 0))
-  `(if radian-debug-p
-       (progn ,@forms)
-     (letf! ((standard-output (lambda (&rest _)))
-             (defun message (&rest _))
-             (defun load (file &optional noerror nomessage nosuffix must-suffix)
-               (ignore nomessage)
-               (funcall load file noerror t nosuffix must-suffix))
-             (defun write-region (start end filename &optional append visit lockname mustbenew)
-               (unless visit (setq visit 'no-message))
-               (funcall write-region start end filename append visit lockname mustbenew)))
-       ,@forms)))
 
 (defmacro eval-if! (cond then &rest body)
   "Expands to THEN if COND is non-nil, to BODY otherwise.
@@ -698,40 +717,6 @@ testing advice (when combined with `rotate-text').
        (dolist (target (cdr targets))
          (advice-remove target #',symbol)))))
 
-(defmacro regx-quiet! (regexps &rest body)
-  "Silencing any messages that match REGEXPS, execute BODY.
-REGEXPS is a list of strings; if `message' would display a
-message string (not including the trailing newline) matching any
-element of REGEXPS, nothing happens. The REGEXPS need not match
-the entire message; include ^ and $ if necessary. REGEXPS may
-also be a single string."
-  (declare (indent 1))
-  (let ((regexps-sym (cl-gensym "regexps")))
-    `(let ((,regexps-sym ,regexps))
-       (when (stringp ,regexps-sym)
-         (setq ,regexps-sym (list ,regexps-sym)))
-       (letf! ((defun message (format &rest args)
-                 (let ((str (apply #'format format args)))
-                   ;; Can't use an unnamed block because during
-                   ;; byte-compilation, some idiot loads `cl', which
-                   ;; sticks an advice onto `dolist' that makes it
-                   ;; behave like `cl-dolist' (i.e., wrap it in
-                   ;; another unnamed block) and therefore breaks
-                   ;; this code.
-                   (cl-block done
-                     (dolist (regexp ,regexps-sym)
-                       (when (or (null regexp)
-                                 (string-match-p regexp str))
-                         (cl-return-from done)))
-                     (funcall message "%s" str)))))
-         ,@body))))
-
-(defun fn-quiet! (func &rest args)
-  "Invoke FUNC with ARGS, silencing all messages.
-This is an `:around' advice for many different functions."
-  (cl-letf (((symbol-function #'message) #'ignore))
-    (apply func args)))
-
 (defun radian--random-string ()
   "Return a random string designed to be globally unique."
   (md5 (format "%s%s%s%s"
@@ -816,3 +801,12 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
 (defmacro mpp (form)
   "Output expanded form of given FORM."
   `(progn (pp (macroexpand-1 ',form)) nil))
+
+(defalias '-key #'leaf-key)
+(defalias '-key* #'leaf-key*)
+(defalias '-keys #'leaf-keys)
+(defalias '-keys* #'leaf-keys*)
+(defalias '-mey #'leaf-key-bind-keymap)
+(defalias '-mey* #'leaf-key-bind-keymap*)
+(defalias '-meys #'leaf-keys-bind-keymap)
+(defalias '-meys* #'leaf-keys-bind-keymap*)

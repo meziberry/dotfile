@@ -23,10 +23,10 @@
 
 ;;; Comp
 (with-eval-after-load 'comp
-  (setq native-comp-compiler-options '("-O2" "-mtune=native")
-        ;; Disable byte-compilation warnings from native-compiled
-        ;; packages from being reported asynchronously into the UI.
-        native-comp-async-report-warnings-errors nil))
+  (customize-set-variable 'native-comp-compiler-options '("-O2" "-mtune=native"))
+  ;; Disable byte-compilation warnings from native-compiled
+  ;; packages from being reported asynchronously into the UI.
+  (customize-set-variable 'native-comp-async-report-warnings-errors nil))
 
 ;;; Radian Variables/Hooks
 (defvar radian-debug-p (or (getenv-internal "DEBUG") init-file-debug)
@@ -466,8 +466,8 @@ This keymap is bound under \\[radian-keymap].")
 
 (defmacro radian-bind-key (key-name command)
   "Bind a key in `radian-keymap'.
-KEY-NAME, COMMAND, and PREDICATE are as in `leaf-key'."
-  `(leaf-key ,key-name ,command 'radian-keymap))
+KEY-NAME, COMMAND, and PREDICATE are as in `-key'."
+  `(-key ,key-name ,command 'radian-keymap))
 
 (defun radian-join-keys (&rest keys)
   "Join key sequences KEYS. Empty strings and nils are discarded.
@@ -609,52 +609,54 @@ binding the variable dynamically over the entire init-file."
 (defmacro pow! (name &rest args)
   "Like `leaf' with :disabled `featurep!'"
   (declare (indent 1))
-  (unless mini-p `(leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
+  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
 
 (defmacro -ow! (name &rest args)
   "Like `pow!' without :straight."
   (declare (indent 1))
-  (unless mini-p `(leaf ,name :disabled (not (featurep! ',name)) ,@args)))
+  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args)))
 
 (defmacro pow (name &rest args)
-  "Same to `pow!', but `:disabled' is nil."
-  (declare (indent 1)) `(leaf ,name :disabled nil ,@args :straight t))
+  "Same to `pow!', but without `:disabled'."
+  (declare (indent 1)) `(leaf ,name ,@args :straight t))
 
 (defalias '-ow #'leaf)
 (put '-ow 'lisp-indent-function 1)
 
-(straight-use-package 'leaf)
-(straight-use-package '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz" :local-repo "leaf-keywords.el"))
+(defalias 'sup #'straight-use-package)
+
+(sup 'leaf)
+(sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz" :local-repo "leaf-keywords.el"))
 
 (-ow leaf-keywords
   :require t
   :config
 
-  ;; 1) Add the :defer-incrementally :after-call to leaf
-  (dolist (keyword '(:defer-incrementally :after-call))
+  ;; 1) Add the :increment :aftercall to leaf
+  (dolist (keyword '(:increment :aftercall))
     (cl-pushnew keyword leaf-defer-keywords))
 
   ;; Accept: 't, symbol and list of these (and nested)
   ;; Return: symbol list.
   ;; Note  : 'nil is just ignored
   ;;         remove duplicate element
-  (cl-pushnew '((eq leaf--key :defer-incrementally)
+  (cl-pushnew '((eq leaf--key :increment)
                 (mapcar (lambda (elm) (if (eq t elm) leaf--name elm))
                         (delete-dups (leaf-flatten leaf--value))))
               leaf-normalize)
 
-  ;; :defer-incrementally t pkg (a b c)
+  ;; :increment t pkg (a b c)
   (setq leaf-keywords-after-conditions
         (plist-put
          leaf-keywords-after-conditions
-         :defer-incrementally
+         :increment
          '`((radian-load-incrementally ',leaf--value) ,@leaf--body)))
 
-  ;; :after-call a-hook b-functions
+  ;; :aftercall a-hook b-functions
   (setq leaf-keywords-after-conditions
         (plist-put
          leaf-keywords-after-conditions
-         :after-call
+         :aftercall
          '`((radian-load-aftercall ',leaf--name ',leaf--value) ,@leaf--body)))
 
   ;; 2) Do works for our pow! -ow!
@@ -684,7 +686,6 @@ binding the variable dynamically over the entire init-file."
                         (if (alist-get leaf--name recipes)
                             (delq t recipes)
                           recipes))))))
-            (if byte-compile-current-file (require leaf--name nil 'noerror))
             `(,@leaf--body))))
 
   ;; 3) Let `radian--current-feature' set in leaf--defaults.
@@ -692,14 +693,17 @@ binding the variable dynamically over the entire init-file."
         (plist-put
          leaf-keywords-before-protection
          :loading
-         '(progn (setq radian--current-feature leaf--name) `,@leaf--body)))
+         '(progn
+            (setq radian--current-feature leaf--name)
+            (if byte-compile-current-file (require leaf--name nil 'noerror))
+            `(,@leaf--body))))
   (setq leaf-defaults (plist-put leaf-defaults :loading t))
 
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
 
 ;; el-patch
-(pow el-patch :init (defvar el-patch-enable-use-package-integration nil))
+(pow el-patch :custom (el-patch-enable-use-package-integration . nil))
 ;; Only needed at compile time, thanks to Jon
 ;; <https://github.com/raxod502/el-patch/pull/11>.
 (eval-when-compile (require 'el-patch))
@@ -731,7 +735,7 @@ If PKG passed, require PKG before binding."
 (pow blackout)
 
 ;;;; Meow
-(pow meow
+(-ow meow
   :straight (meow :repo "meziberry/meow" :branch "develop" :local-repo "meow")
   :custom
   (meow-use-cursor-position-hack . t)
@@ -758,28 +762,19 @@ into `regexp-search-ring'"
 
   :blackout
   (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode))
-
 
-;;; MODULE {Radian-autolods}
-
+;;; MODULE {Radian-foundation}
+;; autoloads
 (defvar radian-local-autoload-dir
   (concat (file-name-directory (file-truename radian-local-init-file)) "autoload")
   "Radian emacs local autoload directory")
 (defvar radian-autoload-dir
     (concat (file-name-directory (file-truename radian-lib-file)) "autoload")
     "Radian emacs local autoload directory")
-(pow radian-autoload
-  :straight
-  `(radian-autoload :local-repo ,radian-autoload-dir :type nil :build (:not compile)))
-(pow local-autoload
-  :straight
-  `(local-autoload :local-repo ,radian-local-autoload-dir :type nil :build (:not compile)))
-
-;;; MODULE {lisp}
-(pow radian-lisp :straight `(radian-lisp :local-repo ,radian-lisp-dir :type nil))
-
-
-;;; MODULE {Radian-foundation}
+(sup `(radian-autoload :local-repo ,radian-autoload-dir :type nil :build (:not compile)))
+(sup `(local-autoload :local-repo ,radian-local-autoload-dir :type nil :build (:not compile)))
+;; lisp
+(sup `(radian-lisp :local-repo ,radian-lisp-dir :type nil :build (:not compile)))
 
 ;;;; gcmh-mode
 (pow gcmh :blackout t)
@@ -934,8 +929,7 @@ If this is a daemon session, load them all immediately instead."
 ;; atrocious uptime (namely, the entire service will just go down for
 ;; more than a day at a time on a regular basis). Unacceptable because
 ;; it keeps breaking Radian CI.
-(straight-use-package
- '(org :host github :repo "emacs-straight/org-mode" :files (:defaults "etc")))
+(sup '(org :host github :repo "emacs-straight/org-mode" :files (:defaults "etc")))
 
 ;;
 ;;;; Keybinds
@@ -1294,14 +1288,14 @@ convert\" UTF8_STRING)'. Disable that."
       (scroll-up 1)))
 
   ;; Enable scrolling with the mouse wheel.
-  (leaf-key "<mouse-4>" #'radian-scroll-down)
-  (leaf-key "<mouse-5>" #'radian-scroll-up))
+  (-key "<mouse-4>" #'radian-scroll-down)
+  (-key "<mouse-5>" #'radian-scroll-up))
 
 ;;;; Window management
 
 ;; Prevent accidental usage of `list-buffers'.
-(leaf-key "C-x C-b" #'switch-to-buffer)
-(leaf-key "C-x b"   #'list-buffers)
+(-key "C-x C-b" #'switch-to-buffer)
+(-key "C-x b"   #'list-buffers)
 
 (declare-function minibuffer-keyboard-quit "delsel")
 (defadvice! radian--advice-keyboard-quit-minibuffer-first
@@ -1398,7 +1392,7 @@ Displays BUFFER according to ALIST and PLIST."
       (shackle--display-buffer-popup-window buffer alist plist)))))
 
 ;; Package `swsw' provides lightway to navigate windows.
-(pow swsw
+(-ow swsw
   :straight (swsw :repo "https://git.sr.ht/~dsemy/swsw")
   :hook (radian-first-input-hook . swsw-mode)
   :chord (",," . swsw-select)
@@ -1453,7 +1447,7 @@ Displays BUFFER according to ALIST and PLIST."
            (window-configuration-to-register '_)
            (delete-other-windows))))
 ;;Map it to a key.
-(leaf-key "tm" #'toggle-maximize-buffer 'radian-comma-keymap)
+(-key "tm" #'toggle-maximize-buffer 'radian-comma-keymap)
 
 ;;;;; ------------------------Head core ends here-----------------------------
 
@@ -1480,7 +1474,7 @@ ourselves."
     input))
 
 ;;;; Complation supported by `vertico'
-(pow vertico
+(-ow vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
   :hook radian-first-input-hook
@@ -1504,11 +1498,11 @@ overrides `completion-styles' during company completion sessions.")
                  args)))
   (add-hook 'rfn-eshadow-update-overlay-hook #'vertico-directory-tidy)
   (add-hook 'minibuffer-setup-hook #'vertico-repeat-save)
-  (leaf-key "DEL" #'vertico-directory-delete-char 'vertico-map)) ;backspace key
+  (-key "DEL" #'vertico-directory-delete-char 'vertico-map)) ;backspace key
 
 ;;;; Orderless
 (pow orderless
-  :after-call radian-first-input-hook
+  :aftercall radian-first-input-hook
   :config
   (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
     "Highlight company matches correctly, and try default completion styles before
@@ -1566,7 +1560,7 @@ orderless."
             ("C-x C-d" . consult-dir)
             ("C-x C-j" . consult-dir-jump-file))))
   :init
-  (leaf-keys
+  (-keys
    (([remap apropos]                      . consult-apropos)
     ([remap bookmark-jump]                . consult-bookmark)
     ([remap meow-pop-to-mark]             . consult-mark)
@@ -1586,7 +1580,7 @@ orderless."
   (advice-add #'multi-occur :override #'consult-multi-occur)
 
   :defer-config
-  (leaf-key "ff" #'+vertico/consult-fd 'meow-leader-keymap)
+  (-key "ff" #'+vertico/consult-fd 'meow-leader-keymap)
 
   (defadvice! +vertico--consult-recent-file-a (&rest _args)
     "`consult-recent-file' needs to have `recentf-mode' on to work correctly"
@@ -1615,13 +1609,12 @@ orderless."
    ;; +default/search-cwd +default/search-other-cwd
    ;; +default/search-notes-for-symbol-at-point
    consult--source-file consult--source-project-file consult--source-bookmark
-   :preview-key (list (kbd "C-SPC") (kbd "C-M-j") (kbd "C-M-k")))
+   :preview-key (kbd "C-SPC"))
 
   (consult-customize
    consult-theme
    :preview-key
-   (list (kbd "C-SPC") (kbd "C-M-j") (kbd "C-M-k")
-         :debounce 0.5 'any))
+   (list (kbd "C-SPC") :debounce 0.5 'any))
 
   (after! org
     (defvar +vertico--consult-org-source
@@ -1633,18 +1626,20 @@ orderless."
               :items    ,(lambda () (mapcar #'buffer-name (org-buffer-list)))))
     (add-to-list 'consult-buffer-sources '+vertico--consult-org-source 'append))
 
-  (leaf-keys (consult-crm-map
-              ("TAB" . +vertico/crm-select)
-              ("RET" . +vertico/crm-exit))))
+  (-keys (consult-crm-map
+              ([tab]     . +vertico/crm-select)
+              ([backtab] . +vertico/crm-select-keep-input)
+              ("RET"     . +vertico/crm-exit))))
 
 ;;;; Embark
-(pow embark
+(-ow embark
   :straight (embark :type git :host github :repo "oantolin/embark"
                     :files ("embark-consult.el" "embark.el" "embark.texi"
                             "avy-embark-collect.el"))
   :init
-  (leaf-keys (minibuffer-local-map
+  (-keys (minibuffer-local-map
               ("C-;" . embark-export)
+              ("C-c C-s" . embark-collect-snapshot)
               ("C-c C-e" . +vertico/embark-export-write)))
 
   :bind
@@ -1735,9 +1730,11 @@ completing-read prompter."
     (func &rest args)
     "Make `save-place' save more quickly and silently."
     :around #'save-place-alist-to-file
-    (quiet*!
-      (cl-letf (((symbol-function #'pp) #'prin1))
-        (apply func args)))))
+    (letf! ((#'pp #'prin1)
+            (defun write-region (start end filename &optional append visit lockname mustbenew)
+              (unless visit (setq visit 'no-message))
+              (funcall write-region start end filename append visit lockname mustbenew)))
+      (apply func args))))
 
 ;;;; Project
 (-ow project
@@ -1759,7 +1756,7 @@ completing-read prompter."
   :config
   (setq +project-commit-log-limit 25)
 
-  (leaf-keys (project-prefix-map
+  (-keys (project-prefix-map
               ("s" . project-find-dir)
               ("l" . +project/commit-log)
               ("t" . +project/retrieve-tag)))
@@ -2185,12 +2182,12 @@ permission."
     (message "Executable permission %s"
              (if allowed "enabled" "disabled"))))
 
-(leaf-key* "s-x" #'radian-set-executable-permission)
+(-key* "s-x" #'radian-set-executable-permission)
 
 ;;;; recentf-mode
 (-ow! recentf
   :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
-  :defer-incrementally easymenu tree-widget timer
+  :increment easymenu tree-widget timer
   :custom (recentf-max-saved-items . 100)
   :commands recentf-open-files
   ;; Set history-length longer
@@ -2211,9 +2208,9 @@ permission."
 
 ;; When region is active, make `capitalize-word' and friends act on
 ;; it.
-(leaf-key "M-c" #'capitalize-dwim)
-(leaf-key "M-l" #'downcase-dwim)
-(leaf-key "M-u" #'upcase-dwim)
+(-key "M-c" #'capitalize-dwim)
+(-key "M-l" #'downcase-dwim)
+(-key "M-u" #'upcase-dwim)
 
 (defun radian-reverse-region-characters (beg end)
   "Reverse the characters in the region from BEG to END.
@@ -2353,7 +2350,7 @@ two inserted lines are the same."
 ;; Feature `whitespace' provides a minor mode for highlighting
 ;; whitespace in various special ways.
 ;;;; Whitespace
-(-ow! whitespace
+(-ow whitespace
   :init
   (defun radian-highlight-non-default-indentation-h ()
     "Highlight whitespace at odds with `indent-tabs-mode'.
@@ -2627,7 +2624,7 @@ buffer."
 ;;;; server
 (-ow! server
   :when (display-graphic-p)
-  :after-call radian-first-input-hook radian-first-file-hook focus-out-hook
+  :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
   (when-let (name (getenv "EMACS_SERVER_NAME"))
     (setq server-name name))
@@ -2738,7 +2735,7 @@ and cannot run in."
   (global-prettify-symbols-mode +1))
 
 ;;;; ligature
-(pow! ligature
+(-ow! ligature
   :straight (ligature :host github :repo "mickeynp/ligature.el")
 
   :config
@@ -2899,7 +2896,7 @@ and cannot run in."
 
   ;; Make C-k kill the sexp following point in Lisp modes, instead of
   ;; just the current line.
-  (leaf-key [remap kill-line] #'sp-kill-hybrid-sexp 'smartparens-mode-map)
+  (-key [remap kill-line] #'sp-kill-hybrid-sexp 'smartparens-mode-map)
 
   (defun radian--smartparens-indent-new-pair (&rest _)
     "Insert an extra newline after point, and reindent."
@@ -2951,7 +2948,7 @@ and cannot run in."
 ;; Package `apheleia' implements a sophisticated algorithm for
 ;; applying code formatters asynchronously on save without moving
 ;; point or modifying the scroll position.
-(pow! apheleia
+(-ow! apheleia
   :straight (apheleia :host github :repo "raxod502/apheleia")
   :init
 
@@ -3282,7 +3279,7 @@ killed (which happens during Emacs shutdown)."
                 (message-log-max nil))
             (indent-region beginning end)))))))
 
-(leaf-key* "C-x TAB" #'radian-indent-defun)
+(-key* "C-x TAB" #'radian-indent-defun)
 
 (defadvice! radian--advice-indent-region-quietly (func &rest args)
   "Make `indent-region' shut up about its progress."
@@ -3297,7 +3294,7 @@ killed (which happens during Emacs shutdown)."
 ;; candidates, as well as optional documentation and source code. Then
 ;; Company allows for multiple frontends to display the candidates,
 ;; such as a tooltip menu. Company stands for "Complete Anything".
-(pow! company
+(-ow! company
   :straight
   (company :type git :flavor melpa :host github
            :repo "company-mode/company-mode" :files (:defaults "icons"))
@@ -3670,7 +3667,7 @@ was printed, and only have ElDoc display if one wasn't."
 
   ;; Clear this keymap, for rebinding prefer keys.
   (defvar sly-prefix-map (make-sparse-keymap))
-  (leaf-keys
+  (-keys
    (sly-prefix-map
     ("d"  . sly-documentation-lookup)
     ("'"  . sly)
@@ -4611,10 +4608,10 @@ SYMBOL is as in `xref-find-definitions'."
 ;; some reason; note that `xref-find-definitions' is not a replacement
 ;; because it is major-mode dependent.) By further analogy, we should
 ;; bind `find-library'.
-(leaf-key "C-h C-f" #'find-function)
-(leaf-key "C-h C-v" #'find-variable)
-(leaf-key "C-h C-o" #'radian-find-symbol)
-(leaf-key "C-h C-l" #'find-library)
+(-key "C-h C-f" #'find-function)
+(-key "C-h C-v" #'find-variable)
+(-key "C-h C-o" #'radian-find-symbol)
+(-key "C-h C-l" #'find-library)
 
 ;; Let's establish a standard location for the Emacs source code.
 (setq source-directory (expand-file-name "src" user-emacs-directory))
@@ -4678,9 +4675,8 @@ REPORT-PROGRESS non-nil (or interactively) means to print more
 messages."
     (interactive (list 'report-progress))
     (cl-block nil
-      (unless (file-newer-than-file-p
-               radian-lib-file
-               (concat radian-lib-file "c"))
+      (unless (cl-some (lambda (f) (file-newer-than-file-p f (concat f "c")))
+                       (list library-file radian-lib-file))
         (when report-progress
           (message "Byte-compiled configuration already up to date"))
         (cl-return))
@@ -4807,7 +4803,6 @@ messages."
 ;; Use `-ow!' here because we already installed Org earlier.
 
 (-ow! org
-
   :preface
   (pow! ox-pandoc)
   (pow! org-appear)
@@ -5637,7 +5632,7 @@ compelling reason, so..."
   (setq-hook! 'org-mode-hook radian-lsp-disable t)
 
   :chord (",c" . org-capture)
-  :defer-incrementally
+  :increment
   calendar find-func format-spec org-macs org-compat org-faces
   org-entities org-list org-pcomplete org-src org-footnote
   org-macro ob org org-agenda org-capture
@@ -5844,7 +5839,7 @@ be invoked before `org-mode-hook' is run."
 
 ;;;; Roam
 
-(pow! org-roam
+(-ow! org-roam
   :straight (org-roam :host github :repo "org-roam/org-roam" :files (:defaults "extensions/*"))
   :preface
   ;; Set this to nil so we can later detect if the user has set custom values
@@ -5872,8 +5867,16 @@ of org-mode to properly utilize ID links.")
         org-roam-mode-section-functions
         #'(org-roam-backlinks-section org-roam-reflinks-section))
 
-  :defer-incrementally
+  :increment
   ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
+  :init/el-patch
+  ;; WORKAROUND:
+  ;; https://github.com/org-roam/org-roam/issues/1221#issuecomment-959871775
+  (defun org-roam-db-query (sql &rest args)
+    "Run SQL query on Org-roam database with ARGS.
+SQL can be either the emacsql vector representation, or a string."
+    (el-patch-add (sleep-for 0 1))
+    (apply #'emacsql (org-roam-db) sql args))
 
   :init
   ;; Don't display warning message dedicated for v1 users. Need to be set early.
@@ -5893,8 +5896,9 @@ the database. See `+org-init-roam-h' for the launch process."
   (defun +org-init-roam-h ()
     "Setup `org-roam' but don't immediately initialize its database.
 Instead, initialize it when it will be actually needed."
-    (letf! ((#'org-roam-db-sync #'ignore))
-      (fn-quiet! #'org-roam-db-autosync-enable))
+    (require 'org-roam-db)
+    (cl-letf (((symbol-function #'org-roam-db-sync) #'ignore))
+      (org-roam-db-autosync-enable))
     (defadvice! +org-roam-try-init-db-a (&rest _)
       "Try to initialize org-roam database at the last possible safe moment.
 In case of failure, fail gracefully."
@@ -5907,19 +5911,18 @@ In case of failure, fail gracefully."
             ;; this will return nil and sync the database.
             (setq run-cleanup-p (emacsql-sqlite-ensure-binary))
           (when run-cleanup-p
-            (setq org-roam--sqlite-available-p nil)
             (org-roam-db-autosync-disable)
             (message (concat "EmacSQL failied to build SQLite binary for org-roam; "
                              "see *Compile-Log* buffer for details.\n"
                              "To try reinitialize org-roam, run \"M-x org-roam-db-autosync-enable\"")))))
       (advice-remove 'org-roam-db-query #'+org-roam-try-init-db-a)
       (org-roam-db-sync)))
+
   (eval-after-load 'org (+org-init-roam-h))
 
   :bind (radian-comma-keymap ("rc". org-roam-capture))
 
   :config
-
   (setq-hook! 'org-roam-find-file-hook
     org-id-link-to-org-use-id +org-roam-link-to-org-use-id)
 
@@ -6299,7 +6302,7 @@ command."
              git-gutter:end-of-hunk
              git-gutter:revert-hunk)
   :init
-  (leaf-keys (radian-comma-keymap
+  (-keys (radian-comma-keymap
               ("v p" . git-gutter:previous-hunk)
               ("v n" . git-gutter:next-hunk)
               ("v a" . radian-git-gutter:beginning-of-hunk)
@@ -6523,7 +6526,7 @@ Instead, display simply a flat colored region in the fringe."
 ;;;; calendar
 (pow! cal-china-x
   :after calendar
-  :after-call calendar
+  :aftercall calendar
   :setq (calendar-week-start-day . 0)
   :config
   (setq
@@ -6684,9 +6687,61 @@ bound dynamically before being used.")
   (add-hook 'before-save-hook #'save-buffer-as-unix))
 
 ;; 2021-10-21 / Thursday, 21. October 2021 / 21.10.2021
-(leaf-key "id" #'insert-date 'radian-comma-keymap)
+(-key "id" #'insert-date 'radian-comma-keymap)
 
 ;;; MODULE {Appearance}
+
+;;;; tab-bar
+(-ow tab-bar
+  :init
+  (defun +tab-bar-right ()
+    (let* ((p (or (cdr (project-current)) ""))
+           (w (string-width p)))
+      (concat
+       (propertize
+        " " 'display `((space :align-to (- (+ right right-fringe right-margin) ,w 1))))
+       p)))
+
+  (defun +tab-bar-tab-format-function (tab i)
+    (let ((current-p (eq (car tab) 'current-tab)))
+      (ignore i current-p)
+      (concat
+       (propertize (concat
+                    " "
+                    (alist-get 'name tab)
+                    " ")
+                   'face
+                   (funcall tab-bar-tab-face-function tab))
+       "")))
+  :bind
+  ([remap project-switch-project] . +tab-bar-switch-project)
+  (radian-comma-keymap ("tp" . tab-bar-switch-to-prev-tab)
+                       ("tn" . tab-bar-switch-to-next-tab))
+  ;; :custom (tab-bar-new-tab-choice . "*scratch*")
+  :setq
+  (tab-bar-border . nil)
+  (tab-bar-close-button . nil)
+  (tab-bar-back-button . nil)
+  (tab-bar-new-button . nil)
+  (tab-bar-format . '(tab-bar-format-tabs +tab-bar-right))
+  (tab-bar-tab-name-format-function . '+tab-bar-tab-format-function)
+  (tab-bar-tab-name-truncated-max . 10)
+  :config
+  (defun +tab-bar-switch-project ()
+    "Switch to project in a new tab, project name will be used as tab name.
+No tab will created if the command is cancelled."
+    (interactive)
+    (let (succ)
+      (unwind-protect
+          (progn
+            (tab-bar-new-tab)
+            (call-interactively #'project-switch-project)
+            (when-let ((proj (project-current)))
+              (tab-bar-rename-tab (format "%s" (file-name-nondirectory (directory-file-name (cdr proj)))))
+              (setq succ t)))
+        (unless succ
+          (tab-bar-close-tab)))))
+  (tab-bar-mode +1))
 
 ;;;; outline-minor-faces
 (pow! outline-minor-faces
@@ -7007,7 +7062,7 @@ font to that size. It's rarely a good idea to do so!")
 
 ;;;; Mode line
 
-(pow! recursion-indicator
+(-ow! recursion-indicator
   :straight (recursion-indicator :host github :repo "minad/recursion-indicator")
   :custom (recursion-indicator-minibuffer . "⮜")
   :init (recursion-indicator-mode +1))
@@ -7054,7 +7109,7 @@ spaces."
     (cond
      ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
       (setf (nth index mode-line-modes) ""))
-     ((equal "(" e) (setf (nth index mode-line-modes) "->"))
+     ((equal "(" e) (setf (nth index mode-line-modes) "⟿"))
      ((equal ")" e) (setf (nth index mode-line-modes) ""))
      (t))
     (setq index (1+ index))))
@@ -7062,12 +7117,12 @@ spaces."
 (defcustom radian-mode-line-left
   '(""
     (:eval (when (featurep 'meow) (meow-indicator)))
-    "   "
+    " "
     mode-line-mule-info
     "%*" "%@"
     ;; Show [*] if the buffer is modified.
     ;; (:eval (radian-mode-line-buffer-modified-status))
-    "   "
+    "  "
     ;; Show the name of the current buffer.
     mode-line-buffer-identification
     "  "
@@ -7078,9 +7133,7 @@ spaces."
     (vc-mode vc-mode)
     " "
     mode-line-modes
-    "<-"
-    mode-line-misc-info
-    "-")
+    mode-line-misc-info)
   "Composite mode line construct to be shown left-aligned."
   :type 'sexp)
 
@@ -7245,7 +7298,7 @@ If RETURN-P, return the message as a string instead of displaying it."
 ;;;; savehist for session
 (-ow! savehist
   ;; persist variables across sessions
-  :defer-incrementally custom
+  :increment custom
   :hook radian-first-input-hook
   :config
   (setq savehist-save-minibuffer-history t
@@ -7291,7 +7344,7 @@ the unwritable tidbits."
 ;; We should only get here if init was successful. If we do,
 ;; byte-compile this file asynchronously in a subprocess using the
 ;; Radian Makefile. That way, the next startup will be fast(er).
-(exclude "NOTE: call manually" (run-with-idle-timer 1 nil #'radian-byte-compile))
+(run-with-idle-timer 1 nil #'radian-byte-compile)
 
 
 ;;; Theme configuration.
@@ -7456,7 +7509,7 @@ the unwritable tidbits."
                (tinker-theme theme)))))
     (radian-run-hooks 'radian-load-theme-hook)))
 
-(leaf-key "M-h" #'radian/change-theme)
+(-key "M-h" #'radian/change-theme)
 
 ;;; Bootstrap interactive session
 
