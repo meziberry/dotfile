@@ -200,3 +200,133 @@ possible, or just one char if that's not possible."
                         ((radian/backward-delete-whitespace-to-column)))))))
         ;; Otherwise, do simple deletion.
         ((delete-char (- n) killflag))))
+
+;;; Diff two regions
+;; Step 1: Select a region and `M-x diff-region-tag-selected-as-a'
+;; Step 2: Select another region and `M-x diff-region-compare-with-b'
+;; Press "q" in evil-mode or "C-c C-c" to exit the diff output buffer
+
+;;;###autoload
+(defun diff-region-format-region-boundary (b e)
+  "Make sure lines are selected and B is less than E"
+  (let* (tmp rlt)
+    ;; swap b e, make sure b < e
+    (when (> b e)
+      (setq tmp b)
+      (setq b e)
+      (set e tmp))
+
+    ;; select lines
+    (save-excursion
+      ;; Another workaround for evil-visual-line bug:
+      ;; In evil-mode, if we use hotkey V or `M-x evil-visual-line` to select line,
+      ;; the (line-beginning-position) of the line which is after the last selected
+      ;; line is always (region-end)! Don't know why.
+      (if (and (> e b)
+               (save-excursion (goto-char e) (= e (line-beginning-position)))
+               (boundp 'evil-state) (eq evil-state 'visual))
+          (setq e (1- e)))
+      (goto-char b)
+      (setq b (line-beginning-position))
+      (goto-char e)
+      (setq e (line-end-position)))
+    (setq rlt (list b e))
+    rlt))
+
+;;;###autoload
+(defmacro diff-region-open-diff-output (content buffer-name)
+  `(let ((rlt-buf (get-buffer-create ,buffer-name)))
+     (save-current-buffer
+       (switch-to-buffer-other-window rlt-buf)
+       (set-buffer rlt-buf)
+       (erase-buffer)
+       (insert ,content)
+       ;; `ffip-diff-mode' is more powerful than `diff-mode'
+       (ffip-diff-mode)
+       (goto-char (point-min)))))
+
+;;;###autoload
+(defun diff-region-tag-selected-as-a ()
+  "Select a region to compare."
+  (interactive)
+  (when (region-active-p)
+    (let* (tmp buf)
+      ;; select lines
+      (setq tmp (diff-region-format-region-boundary (region-beginning) (region-end)))
+      (setq buf (get-buffer-create "*Diff-regionA*"))
+      (save-current-buffer
+        (set-buffer buf)
+        (erase-buffer))
+      (append-to-buffer buf (car tmp) (cadr tmp))))
+  (message "Now select other region to compare and run `diff-region-compare-with-b'"))
+
+;;;###autoload
+(defun diff-region-compare-with-b ()
+  "Compare current region with the region set by `diff-region-tag-selected-as-a'.
+If no region is selected, `kill-ring' or clipboard is used instead."
+  (interactive)
+  (let* (rlt-buf
+         diff-output
+         tmp
+         ;; file A
+         (fa (make-temp-file (expand-file-name "diff-region"
+                                               (or small-temporary-file-directory
+                                                   temporary-file-directory))))
+         ;; file B
+         (fb (make-temp-file (expand-file-name "diff-region"
+                                               (or small-temporary-file-directory
+                                                   temporary-file-directory)))))
+    (when (and fa (file-exists-p fa) fb (file-exists-p fb))
+      (cond
+       ((region-active-p)
+        ;; text from selected region
+        (setq tmp (diff-region-format-region-boundary (region-beginning) (region-end)))
+        (write-region (car tmp) (cadr tmp) fb))
+       (t
+        ;; text from `kill-ring' or clipboard
+        (let* ((choice (completing-read "Since no region selected, compare text in:"
+                                        '("kill-ring" "clipboard")))
+               (txt (cond
+                     ((string= choice "kill-ring")
+                      (car kill-ring))
+                     ((string= choice "clipboard")
+                      (let* ((powershell-program (executable-find "powershell.exe")))
+                        (cond
+                         ;; Windows
+                         ((and *win64* (fboundp 'w32-get-clipboard-data))
+                          ;; `w32-set-clipboard-data' makes `w32-get-clipboard-data' always return null
+                          (w32-get-clipboard-data))
+                         ;; Windows 10
+                         (powershell-program
+                          (string-trim-right
+                           (with-output-to-string
+                             (with-current-buffer standard-output
+                               (call-process powershell-program nil t nil "-command" "Get-Clipboard")))))
+                         ;; xclip can handle
+                         (t (xclip-get-selection 'clipboard))))))))
+          (with-temp-file fb
+            (insert txt)))))
+      ;; save region A as file A
+      (save-current-buffer
+        (set-buffer (get-buffer-create "*Diff-regionA*"))
+        (write-region (point-min) (point-max) fa))
+      ;; diff NOW!
+      ;; show the diff output
+      (cond
+       ((string= (setq diff-output (shell-command-to-string (format "%s -Nabur %s %s" diff-command fa fb))) "")
+        (message "Two regions are SAME!"))
+       ((executable-find "git")
+        (unless (featurep 'magit) (require 'magit))
+        (magit-diff-setup-buffer nil (list "--no-index" "--indent-heuristic" "--histogram")
+                                 nil (list (magit-convert-filename-for-git
+                                            (expand-file-name fa))
+                                           (magit-convert-filename-for-git
+                                            (expand-file-name fb)))))
+       (t
+        (diff-region-open-diff-output diff-output
+                                      "*Diff-region-output*")))
+      ;; clean the temporary files
+      (if (and fa (file-exists-p fa))
+          (delete-file fa))
+      (if (and fb (file-exists-p fb))
+          (delete-file fb)))))

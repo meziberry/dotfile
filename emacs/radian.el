@@ -13,8 +13,8 @@
 ;; recompile.
 (eval
  `(unless (equal (list (emacs-version) radian-lib-file)
-           ',(eval-when-compile
-               (list (emacs-version) radian-lib-file)))
+                 ',(eval-when-compile
+                     (list (emacs-version) radian-lib-file)))
     (throw 'stale-bytecode nil)))
 
 ;; Disable frequency of GC during init, and after init shall be set
@@ -52,26 +52,31 @@ setting the DEBUG envvar will enable this at startup.")
 (defconst IS-BSD        (or IS-MAC (eq system-type 'berkeley-unix)))
 
 ;; Directories/files
-(defvar radian-directory (file-name-directory
-                          (directory-file-name
-                           (file-name-directory
-                            radian-lib-file)))
+(defconst *radian-directory* (file-name-directory
+                              (directory-file-name
+                               (file-name-directory
+                                radian-lib-file)))
   "Path to the Radian Git repository.")
+(defconst *local-directory* (file-name-directory
+                             (directory-file-name
+                              (file-name-directory
+                               (file-truename radian-local-init-file))))
+  "Path to the emacs local configuration Git repository.")
 
-(defconst radian-lisp-dir (concat radian-directory "emacs/lisp/")
+(defconst *radian-lispdir* (concat *radian-directory* "emacs/lisp/")
   "Radian lisp directory for local packages")
 
-(defconst radian-emacs-dir
+(defconst *radian-emacsdir*
   (eval-when-compile (file-truename user-emacs-directory))
   "The path to the currently loaded .emacs.d directory. Must end with a slash.")
 
-(defconst radian-etc-dir (concat radian-emacs-dir "etc/")
+(defconst *radian-etcdir* (concat *radian-emacsdir* "etc/")
   "Directory for non-volatile local storage.
 
 Use this for files that don't change much, like server binaries, external
 dependencies or long-term shared data. Must end with a slash.")
 
-(defconst radian-cache-dir (concat radian-emacs-dir "cache/")
+(defconst *radian-cache-dir* (concat *radian-emacsdir* "cache/")
   "Directory for non-volatile local storage.
 
 Use this for files that don't change much, like server binaries, external
@@ -176,6 +181,9 @@ in daemon sessions (they are loaded immediately at startup).")
   :group 'radian-hooks
   :type 'hook)
 
+(defvar radian-theme-list '((modus-vivendi . t) (modus-operandi . nil))
+  "Theme sequence of changing. `(THEME-NAME . IS-DARK-THEME)'")
+
 ;;; Load some libraries.
 
 ;; Load utility libraries
@@ -183,6 +191,43 @@ in daemon sessions (they are loaded immediately at startup).")
 (require 'map)
 (require 'subr-x)
 (load (file-name-sans-extension library-file) nil 'nomessage)
+
+;;; MODULE {option-packages}
+(defvar radian-disabled-packages
+  '(haskell-mode)
+  "List of packages that Radian should not load. Radian always loads the
+packages in `radian-core-packages' even if they are members of this list.
+If the list starts with `:not', packages that are not part of this
+list are not loaded instead. This variable should be modified in
+`radian-before-straight-hook' to be effective.")
+
+(defvar radian-core-packages
+  '(leaf straight no-littering restart-emacs gcmh blackout
+     leaf-keywords el-patch apheleia)
+  "List of Radian core packages")
+
+(defun featurep! (package)
+  "Return nil if PACKAGE should not be loaded by Radian."
+  (declare (indent defun))
+  (if (symbolp package)
+      (or (memq package radian-core-packages)
+          (if (eq (car radian-disabled-packages) :not)
+              (memq package radian-disabled-packages)
+            (not (memq package radian-disabled-packages))))
+    (let ((p (car package)))
+      (cond ((eq p :or) (cl-some #'featurep! (cdr package)))
+            ((eq p :and) (cl-every #'featurep! (cdr package)))
+            (t (cl-every #'featurep! (cdr package)))))))
+
+(defsubst radian-disable-feature (feature)
+  "Disable Radian's customization of FEATURE.
+FEATURE can be the name of any package. No checks are made to
+ensure that the name is valid.
+Features should be disabled in `radian-before-straight-hook'."
+  (if (eq (car radian-disabled-packages) :not)
+      (setq radian-disabled-packages
+            (delq feature radian-disabled-packages))
+    (cl-pushnew feature radian-disabled-packages)))
 
 ;;; Define special hooks and load local configuration
 
@@ -273,7 +318,6 @@ unexpected ways."
        (add-hook! ',hook
          (defun ,func-name ()
            "Automatically-generated local hook function."
-           ;; (eval (prog1 nil ,@body) lexical-binding)
            ,@body)))))
 
 (defmacro radian--run-hook (name)
@@ -478,44 +522,6 @@ KEY-NAME, COMMAND, and PREDICATE are as in `-key'."
   (string-join (remove "" (mapcar #'string-trim (remove nil keys))) " "))
 
 
-;;; MODULE {Radian-packages}
-
-(defvar radian-disabled-packages
-  '(haskell-mode)
-  "List of packages that Radian should not load. Radian always loads the
-packages in `radian-core-packages' even if they are members of this list.
-If the list starts with `:not', packages that are not part of this
-list are not loaded instead. This variable should be modified in
-`radian-before-straight-hook' to be effective.")
-
-(defvar radian-core-packages
-  '(leaf straight no-littering restart-emacs gcmh blackout
-     leaf-keywords el-patch apheleia)
-  "List of Radian core packages")
-
-(defun featurep! (package)
-  "Return nil if PACKAGE should not be loaded by Radian."
-  (declare (indent defun))
-  (if (symbolp package)
-      (or (memq package radian-core-packages)
-          (if (eq (car radian-disabled-packages) :not)
-              (memq package radian-disabled-packages)
-            (not (memq package radian-disabled-packages))))
-    (let ((p (car package)))
-      (cond ((eq p :or) (cl-some #'featurep! (cdr package)))
-            ((eq p :and) (cl-every #'featurep! (cdr package)))
-            (t (cl-every #'featurep! (cdr package)))))))
-
-(defsubst radian-disable-feature (feature)
-  "Disable Radian's customization of FEATURE.
-FEATURE can be the name of any package. No checks are made to
-ensure that the name is valid.
-Features should be disabled in `radian-before-straight-hook'."
-  (if (eq (car radian-disabled-packages) :not)
-      (setq radian-disabled-packages
-            (delq feature radian-disabled-packages))
-    (cl-pushnew feature radian-disabled-packages)))
-
 ;;;;; --> Mini init-file.
 ;; We need the minimum init-file for some emergency.
 (defvar mini-p nil)
@@ -605,25 +611,6 @@ binding the variable dynamically over the entire init-file."
 ;; Package `leaf' provides a handy macro by the same name which
 ;; is essentially a wrapper around `eval-after-load' with a lot
 ;; of handy syntactic sugar and useful features.
-
-(defmacro pow! (name &rest args)
-  "Like `leaf' with :disabled `featurep!'"
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
-
-(defmacro -ow! (name &rest args)
-  "Like `pow!' without :straight."
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args)))
-
-(defmacro pow (name &rest args)
-  "Same to `pow!', but without `:disabled'."
-  (declare (indent 1)) `(leaf ,name ,@args :straight t))
-
-(defalias '-ow #'leaf)
-(put '-ow 'lisp-indent-function 1)
-
-(defalias 'sup #'straight-use-package)
 
 (sup 'leaf)
 (sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz" :local-repo "leaf-keywords.el"))
@@ -728,8 +715,8 @@ If PKG passed, require PKG before binding."
 ;; is much more clean and organized.
 (pow no-littering
   :pre-setq
-  (no-littering-etc-directory . radian-etc-dir)
-  (no-littering-var-directory . radian-cache-dir)
+  (no-littering-etc-directory . *radian-etcdir*)
+  (no-littering-var-directory . *radian-cache-dir*)
   :require t)
 
 (pow blackout)
@@ -765,16 +752,14 @@ into `regexp-search-ring'"
 
 ;;; MODULE {Radian-foundation}
 ;; autoloads
-(defvar radian-local-autoload-dir
-  (concat (file-name-directory (file-truename radian-local-init-file)) "autoload")
+(defvar radian-autoload-dir (concat *radian-directory* "emacs/autoload")
   "Radian emacs local autoload directory")
-(defvar radian-autoload-dir
-    (concat (file-name-directory (file-truename radian-lib-file)) "autoload")
-    "Radian emacs local autoload directory")
 (sup `(radian-autoload :local-repo ,radian-autoload-dir :type nil :build (:not compile)))
+(defvar radian-local-autoload-dir (concat *local-directory* "emacs/autoload")
+  "Radian emacs local autoload directory")
 (sup `(local-autoload :local-repo ,radian-local-autoload-dir :type nil :build (:not compile)))
 ;; lisp
-(sup `(radian-lisp :local-repo ,radian-lisp-dir :type nil :build (:not compile)))
+(sup `(radian-lisp :local-repo ,*radian-lispdir* :type nil :build (:not compile)))
 
 ;;;; gcmh-mode
 (pow gcmh :blackout t)
@@ -833,7 +818,7 @@ If NOW is non-nil, load PACKAGES incrementally, in
                       ;; If `default-directory' is a directory that doesn't exist
                       ;; or is unreadable, Emacs throws up file-missing errors, so
                       ;; we set it to a directory we know exists and is readable.
-                      (let ((default-directory radian-emacs-dir)
+                      (let ((default-directory *radian-emacsdir*)
                             (inhibit-message t)
                             file-name-handler-alist)
                         (require req nil t))
@@ -875,7 +860,7 @@ If this is a daemon session, load them all immediately instead."
                   ;; exist or is unreadable, Emacs throws up file-missing
                   ;; errors, so we set it to a directory we know exists and
                   ;; is readable.
-                  (let ((default-directory radian-emacs-dir))
+                  (let ((default-directory *radian-emacsdir*))
                     (require name))
                 ((debug error)
                  (message "Failed to load deferred package %s: %s" name e)))
@@ -957,16 +942,16 @@ If this is a daemon session, load them all immediately instead."
 ;;        Global state keymap - evil-global-set-key
 
 (eval-cond!
- (IS-MAC
-  ;; mac-* variables are used by the special emacs-mac build of Emacs by
-  ;; Yamamoto Mitsuharu, while other builds use ns-*.
-  (setq mac-command-modifier      'super
-        mac-option-modifier       'meta
-        ;; Free up the right option for character composition
-        mac-right-option-modifier 'none))
- (IS-WINDOWS
-  (setq w32-lwindow-modifier 'super
-        w32-rwindow-modifier 'super)))
+  (IS-MAC
+   ;; mac-* variables are used by the special emacs-mac build of Emacs by
+   ;; Yamamoto Mitsuharu, while other builds use ns-*.
+   (setq mac-command-modifier      'super
+         mac-option-modifier       'meta
+         ;; Free up the right option for character composition
+         mac-right-option-modifier 'none))
+  (IS-WINDOWS
+   (setq w32-lwindow-modifier 'super
+         w32-rwindow-modifier 'super)))
 
 ;; HACK Fixes Emacs' disturbing inability to distinguish C-i from TAB.
 (define-key
@@ -1133,7 +1118,7 @@ Only do this once, unless AGAIN is non-nil."
         (ignore-errors (kill-buffer buf-name))
         (with-current-buffer (get-buffer-create buf-name)
           (let* ((python-script
-                  (expand-file-name "scripts/print_env.py" radian-directory))
+                  (expand-file-name "scripts/print_env.py" *radian-directory*))
                  (delimiter (radian--random-string))
                  (sh-script (format ". %s && %s %s"
                                     (shell-quote-argument
@@ -1342,7 +1327,7 @@ active minibuffer, even if the minibuffer is not selected."
                  (catch 'done
                    (walk-window-tree
                     (lambda (w) (unless (or (eq w window) (window-dedicated-p w))
-                             (throw 'done nil)))
+                                  (throw 'done nil)))
                     frame)
                    t)))
            (not (window-minibuffer-p window))
@@ -1627,9 +1612,9 @@ orderless."
     (add-to-list 'consult-buffer-sources '+vertico--consult-org-source 'append))
 
   (-keys (consult-crm-map
-              ([tab]     . +vertico/crm-select)
-              ([backtab] . +vertico/crm-select-keep-input)
-              ("RET"     . +vertico/crm-exit))))
+          ([tab]     . +vertico/crm-select)
+          ([backtab] . +vertico/crm-select-keep-input)
+          ("RET"     . +vertico/crm-exit))))
 
 ;;;; Embark
 (-ow embark
@@ -1638,9 +1623,9 @@ orderless."
                             "avy-embark-collect.el"))
   :init
   (-keys (minibuffer-local-map
-              ("C-;" . embark-export)
-              ("C-c C-s" . embark-collect-snapshot)
-              ("C-c C-e" . +vertico/embark-export-write)))
+          ("C-;" . embark-export)
+          ("C-c C-s" . embark-collect-snapshot)
+          ("C-c C-e" . +vertico/embark-export-write)))
 
   :bind
   ([remap describe-bindings] . embark-bindings)
@@ -1757,9 +1742,9 @@ completing-read prompter."
   (setq +project-commit-log-limit 25)
 
   (-keys (project-prefix-map
-              ("s" . project-find-dir)
-              ("l" . +project/commit-log)
-              ("t" . +project/retrieve-tag)))
+          ("s" . project-find-dir)
+          ("l" . +project/commit-log)
+          ("t" . +project/retrieve-tag)))
 
   (cl-defmethod project-root ((project (head local)))
     "Project root for PROJECT with HEAD and LOCAL."
@@ -2007,9 +1992,9 @@ unquote it using a comma."
                              (downcase
                               bare-filename)))))))
          (defun-other-window-name
-           (intern
-            (concat (symbol-name defun-name)
-                    "-other-window")))
+          (intern
+           (concat (symbol-name defun-name)
+                   "-other-window")))
          (docstring (format "Edit file %s." full-filename))
          (docstring-other-window
           (format "Edit file %s, in another window."
@@ -2025,16 +2010,16 @@ unquote it using a comma."
                                       full-filename))))
                           (find-file ,full-filename))))
          (defun-other-window-form
-           `(defun ,defun-other-window-name ()
-              ,docstring-other-window
-              (interactive)
-              (when (or (file-exists-p ,full-filename)
-                        (yes-or-no-p
-                         ,(format
-                           "Does not exist, really visit %s? "
-                           (file-name-nondirectory
-                            full-filename))))
-                (find-file-other-window ,full-filename))))
+          `(defun ,defun-other-window-name ()
+             ,docstring-other-window
+             (interactive)
+             (when (or (file-exists-p ,full-filename)
+                       (yes-or-no-p
+                        ,(format
+                          "Does not exist, really visit %s? "
+                          (file-name-nondirectory
+                           full-filename))))
+               (find-file-other-window ,full-filename))))
          (full-keybinding
           (when keybinding
             (radian-join-keys "e" keybinding)))
@@ -2054,7 +2039,7 @@ unquote it using a comma."
 
 ;; Now we register shortcuts to files relevant to Radian.
 
-(radian-register-dotfile ,radian-directory "r a" "radian-repo")
+(radian-register-dotfile ,*radian-directory* "r a" "radian-repo")
 
 ;; Emacs
 (radian-register-dotfile
@@ -2064,10 +2049,10 @@ unquote it using a comma."
  ,(expand-file-name "early-init.el" user-emacs-directory)
  "e e")
 (radian-register-dotfile
- ,(expand-file-name "emacs/radian.el" radian-directory)
+ ,(expand-file-name "emacs/radian.el" *radian-directory*)
  "e r")
 (radian-register-dotfile
- ,(expand-file-name "emacs/library.el" radian-directory)
+ ,(expand-file-name "emacs/library.el" *radian-directory*)
  "e b")
 (radian-register-dotfile
  ,(expand-file-name "straight/versions/radian.el" user-emacs-directory)
@@ -2948,7 +2933,7 @@ and cannot run in."
 ;; Package `apheleia' implements a sophisticated algorithm for
 ;; applying code formatters asynchronously on save without moving
 ;; point or modifying the scroll position.
-(-ow! apheleia
+(-ow apheleia
   :straight (apheleia :host github :repo "raxod502/apheleia")
   :init
 
@@ -3031,18 +3016,18 @@ into what `lookup-key' and `define-key' want."
              ;; decide which command we want to run when a key is
              ;; pressed.
              (define-key keymap event
-               `(menu-item
-                 nil ,company-cmd :filter
-                 (lambda (cmd)
-                   ;; There doesn't seem to be any obvious
-                   ;; function from Company to tell whether or not
-                   ;; a completion is in progress (à la
-                   ;; `company-explicit-action-p'), so I just
-                   ;; check whether or not `company-my-keymap' is
-                   ;; defined, which seems to be good enough.
-                   (if company-my-keymap
-                       ',company-cmd
-                     ',yas-cmd))))))
+                         `(menu-item
+                           nil ,company-cmd :filter
+                           (lambda (cmd)
+                             ;; There doesn't seem to be any obvious
+                             ;; function from Company to tell whether or not
+                             ;; a completion is in progress (à la
+                             ;; `company-explicit-action-p'), so I just
+                             ;; check whether or not `company-my-keymap' is
+                             ;; defined, which seems to be good enough.
+                             (if company-my-keymap
+                                 ',company-cmd
+                               ',yas-cmd))))))
          company-active-map)
         keymap)
       "Keymap which delegates to both `company-active-map' and `yas-keymap'.
@@ -3468,9 +3453,9 @@ menu to disappear and then come back after `company-idle-delay'."
 (pow! dumb-jump
   :init
   (add-hook! 'after-change-major-mode-hook
-      (defun dumb-jump-enable ()
-        "enable `dumb-jump'"
-        (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t)))
+    (defun dumb-jump-enable ()
+      "enable `dumb-jump'"
+      (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t)))
   :bind* (("C-M-d" . xref-find-references)))
 
 ;;;; Display contextual metadata
@@ -3601,7 +3586,6 @@ was printed, and only have ElDoc display if one wasn't."
 ;; and supporting functions for dealing with Lisp code.
 (-ow! lisp-mode
   :init
-
   (add-to-list 'safe-local-variable-values
                '(lisp-indent-function . common-lisp-indent-function)))
 ;; common-lisp
@@ -3626,9 +3610,7 @@ was printed, and only have ElDoc display if one wasn't."
 
   :config
 
-  (setq common-lisp-hyperspec-root
-        (concat "file://" *zadian/* "/emacs/docs/HyperSpec/")
-        sly-kill-without-query-p t
+  (setq sly-kill-without-query-p t
         sly-net-coding-system 'utf-8-unix
         ;; Doom defaults to non-fuzzy search, because it is faster and more
         ;; precise (but requires more keystrokes). Change this to
@@ -4051,13 +4033,13 @@ https://github.com/jrblevin/markdown-mode/issues/328."
   (setq python-fill-docstring-style 'django)
 
   (add-hook! 'python-mode-hook
-      (defun radian--python-fix-outline-mode-config ()
-        "Prevent `python-mode' from overriding `outline-minor-mode' config.
+    (defun radian--python-fix-outline-mode-config ()
+      "Prevent `python-mode' from overriding `outline-minor-mode' config.
 If this hook is not used, then `python-mode' will override even a
 file-local setting of e.g. `outline-regexp' with its own setting."
-        (kill-local-variable 'outline-regexp)
-        (kill-local-variable 'outline-level)
-        (kill-local-variable 'outline-heading-end-regexp)))
+      (kill-local-variable 'outline-regexp)
+      (kill-local-variable 'outline-level)
+      (kill-local-variable 'outline-heading-end-regexp)))
 
   (add-hook! 'python-mode-hook
     (defun radian--python-no-reindent-on-colon ()
@@ -4684,7 +4666,7 @@ messages."
         (message "Byte-compiling updated configuration..."))
       (ignore-errors
         (kill-buffer " *radian-byte-compile*"))
-      (let ((default-directory radian-directory))
+      (let ((default-directory *radian-directory*))
         (radian-env-setup)
         (make-process
          :name "radian-byte-compile"
@@ -4822,26 +4804,26 @@ messages."
   (defun +org-init-appearance-h ()
     "Configures the UI for `org-mode'."
     (setq ;;org-indirect-buffer-display #'current-window
-          org-eldoc-breadcrumb-separator " → "
-          org-enforce-todo-dependencies t
-          org-entities-user
-          '(("flat"  "\\flat" nil "" "" "266D" "♭")
-            ("sharp" "\\sharp" nil "" "" "266F" "♯"))
-          org-fontify-done-headline t
-          org-fontify-quote-and-verse-blocks t
-          org-fontify-whole-heading-line t
-          org-hide-leading-stars t
-          org-image-actual-width nil
-          org-imenu-depth 8
-          ;; Sub-lists should have different bullets
-          org-list-demote-modify-bullet '(("+" . "-") ("-" . "+") ("*" . "+") ("1." . "a."))
-          org-priority-faces
-          '((?A . error)
-            (?B . warning)
-            (?C . success))
-          org-startup-indented t
-          org-tags-column 0
-          org-use-sub-superscripts '{})
+     org-eldoc-breadcrumb-separator " → "
+     org-enforce-todo-dependencies t
+     org-entities-user
+     '(("flat"  "\\flat" nil "" "" "266D" "♭")
+       ("sharp" "\\sharp" nil "" "" "266F" "♯"))
+     org-fontify-done-headline t
+     org-fontify-quote-and-verse-blocks t
+     org-fontify-whole-heading-line t
+     org-hide-leading-stars t
+     org-image-actual-width nil
+     org-imenu-depth 8
+     ;; Sub-lists should have different bullets
+     org-list-demote-modify-bullet '(("+" . "-") ("-" . "+") ("*" . "+") ("1." . "a."))
+     org-priority-faces
+     '((?A . error)
+       (?B . warning)
+       (?C . success))
+     org-startup-indented t
+     org-tags-column 0
+     org-use-sub-superscripts '{})
 
     (setq org-refile-targets
           '((nil :maxlevel . 3)
@@ -5574,8 +5556,8 @@ compelling reason, so..."
   (defvar org-id-locations-file nil)
   (defvar org-attach-id-dir nil)
 
-  (setq org-publish-timestamp-directory (concat radian-cache-dir "org-timestamps/")
-        org-preview-latex-image-directory (concat radian-cache-dir "org-latex/")
+  (setq org-publish-timestamp-directory (concat *radian-cache-dir* "org-timestamps/")
+        org-preview-latex-image-directory (concat *radian-cache-dir* "org-latex/")
         ;; Recognize a), A), a., A., etc -- must be set before org is loaded.
         org-list-allow-alphabetical t)
 
@@ -6303,11 +6285,11 @@ command."
              git-gutter:revert-hunk)
   :init
   (-keys (radian-comma-keymap
-              ("v p" . git-gutter:previous-hunk)
-              ("v n" . git-gutter:next-hunk)
-              ("v a" . radian-git-gutter:beginning-of-hunk)
-              ("v e" . git-gutter:end-of-hunk)
-              ("v k" . git-gutter:revert-hunk)))
+          ("v p" . git-gutter:previous-hunk)
+          ("v n" . git-gutter:next-hunk)
+          ("v a" . radian-git-gutter:beginning-of-hunk)
+          ("v e" . git-gutter:end-of-hunk)
+          ("v k" . git-gutter:revert-hunk)))
 
   ;; Disable in Org mode, as per
   ;; <https://github.com/syl20bnr/spacemacs/issues/10555> and
@@ -6376,14 +6358,13 @@ changes, which means that `git-gutter' needs to be re-run.")
         (when git-gutter-mode
           (git-gutter)))))
 
-  (-ow! apheleia
+  (-ow apheleia
     :config
-
     (add-hook! 'apheleia-post-format-hook
-        (defun radian--git-gutter-after-apheleia ()
-          "Update `git-gutter' after Apheleia formats the buffer."
-          (when git-gutter-mode
-            (git-gutter)))))
+      (defun radian--git-gutter-after-apheleia ()
+        "Update `git-gutter' after Apheleia formats the buffer."
+        (when git-gutter-mode
+          (git-gutter)))))
 
   :blackout git-gutter-mode)
 
@@ -6514,6 +6495,7 @@ Instead, display simply a flat colored region in the fringe."
                      (format "custom-%d-%d.el" (emacs-pid) (random))
                      temporary-file-directory))
               (defvar radian-lib-file ,radian-lib-file)
+              (defvar library-file ,library-file)
               (defvar radian--finalize-init-hook nil))
            (current-buffer))
           (insert-file-contents-literally radian-lib-file)
@@ -6717,7 +6699,7 @@ bound dynamically before being used.")
   ([remap project-switch-project] . +tab-bar-switch-project)
   (radian-comma-keymap ("tp" . tab-bar-switch-to-prev-tab)
                        ("tn" . tab-bar-switch-to-next-tab))
-  ;; :custom (tab-bar-new-tab-choice . "*scratch*")
+  :custom (tab-bar-new-tab-choice . "*scratch*")
   :setq
   (tab-bar-border . nil)
   (tab-bar-close-button . nil)
@@ -6771,7 +6753,7 @@ No tab will created if the command is cancelled."
   :init
   (defvar global-hl-line-modes
     '(prog-mode text-mode conf-mode special-mode
-      org-agenda-mode)
+                org-agenda-mode)
     "What modes to enable `hl-line-mode' in.")
   :config
   ;; HACK I reimplement `global-hl-line-mode' so we can white/blacklist modes in
@@ -7278,7 +7260,7 @@ spaces."
 ;; HACK Stop sessions from littering the user directory
 (defadvice! radian--use-cache-dir-a (session-id)
   :override #'emacs-session-filename
-  (concat radian-cache-dir "emacs-session." session-id))
+  (concat *radian-cache-dir* "emacs-session." session-id))
 
 (defun radian-display-benchmark-h (&optional return-p)
   "Display a benchmark including number of packages and modules loaded.
@@ -7331,15 +7313,14 @@ the unwritable tidbits."
 
 ;;; Closing
 
-(unless mini-p
+(unless (or mini-p (bound-and-true-p radian--currently-profiling-p))
   ;; Prune the build cache for straight.el; this will prevent it from
   ;; growing too large. Do this after the final hook to prevent packages
   ;; installed there from being pruned.
   (straight-prune-build-cache)
   ;; Occasionally prune the build directory as well. For similar reasons
   ;; as above, we need to do this after local configuration.
-  (unless (bound-and-true-p radian--currently-profiling-p)
-    (if (= 0 (random 100)) (straight-prune-build-directory))))
+  (if (= 0 (random 100)) (straight-prune-build-directory)))
 
 ;; We should only get here if init was successful. If we do,
 ;; byte-compile this file asynchronously in a subprocess using the
@@ -7438,11 +7419,19 @@ the unwritable tidbits."
    modus-themes-scale-title 1.3
    modus-themes-scale-small 0.9))
 
-;;;; change theme and customize face.
-(defvar radian-theme-list '((modus-vivendi . t) (modus-operandi . nil))
-  "Theme sequence of changing. `(THEME-NAME . IS-DARK-THEME)'")
-(setq radian-theme-list '((nano . t) (nano . nil)))
+(-ow nano-theme
+  :custom
+  (nano-theme-padded-modeline . nil)
+  (nano-theme-header-scales . '(1.15 1.12 1.1 1.0 1.0 1.0 1.0))
+  :config
+  (eval-when! (boundp 'ns-system-appearance)
+    (add-to-list
+     'ns-system-appearance-change-functions
+     (lambda (l?d) (setq nano-theme-light/dark l?d)
+       (mapc #'disable-theme custom-enabled-themes)
+       (load-theme 'nano t)))))
 
+;;;; change theme and customize face.
 (with-no-warnings
   (defun radian/change-theme ()
     (interactive)

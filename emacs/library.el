@@ -275,7 +275,7 @@ See `eval-if!' for details on this macro's purpose."
   "ARGS is a list of (COND . BODY)
 Expands to BODY if COND is non-nil at compile/expansion time.
 See `eval-cond!' for details on this macro's purpose."
-  (declare (indent 1))
+  (declare (indent 0))
   (if (consp args)
       (let* ((clause (car args))
              (rest (cdr args))
@@ -798,15 +798,37 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
             ((add-hook hook fn -101)))
       fn)))
 
-(defmacro mpp (form)
+(defmacro spp (form) "Super pp" `(progn (pp ,form) nil))
+(defmacro mpp (form &optional all)
   "Output expanded form of given FORM."
-  `(progn (pp (macroexpand-1 ',form)) nil))
+  (let ((expand (if all 'macroexpand-all 'macroexpand-1)))
+    `(spp (,expand ',form))))
 
-(defalias '-key #'leaf-key)
-(defalias '-key* #'leaf-key*)
-(defalias '-keys #'leaf-keys)
-(defalias '-keys* #'leaf-keys*)
-(defalias '-mey #'leaf-key-bind-keymap)
-(defalias '-mey* #'leaf-key-bind-keymap*)
-(defalias '-meys #'leaf-keys-bind-keymap)
-(defalias '-meys* #'leaf-keys-bind-keymap*)
+;;; Wraps of leaf and straight
+(defmacro pow! (name &rest args)
+  "Like `leaf' with :disabled `featurep!'"
+  (declare (indent 1))
+  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
+
+(defmacro -ow! (name &rest args)
+  "Like `pow!' without :straight."
+  (declare (indent 1))
+  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args)))
+
+(defmacro pow (name &rest args)
+  "Same to `pow!', but without `:disabled'."
+  (declare (indent 1)) `(leaf ,name ,@args :straight t))
+
+(defalias '-ow #'leaf)
+(put '-ow 'lisp-indent-function 1)
+
+(defalias 'sup #'straight-use-package)
+
+(defalias '-key 'leaf-key)
+(defalias '-key* 'leaf-key*)
+(defalias '-keys 'leaf-keys)
+(defalias '-keys* 'leaf-keys*)
+(defalias '-mey 'leaf-key-bind-keymap)
+(defalias '-mey* 'leaf-key-bind-keymap*)
+(defalias '-meys 'leaf-keys-bind-keymap)
+(defalias '-meys* 'leaf-keys-bind-keymap*)
