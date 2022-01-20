@@ -66,7 +66,7 @@ If no project is active, return all buffers."
     (if-let* ((project-root
                (if project (expand-file-name project)
                  (radian-project-root))))
-        (project--buffer-list)
+        (project--buffer-list project)
       buffers)))
 
 ;;;###autoload

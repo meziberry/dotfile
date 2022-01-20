@@ -60,7 +60,7 @@
  ("json-mode" . "eedb4560034f795a7950fa07016bd4347c368873")
  ("json-snatcher" . "b28d1c0670636da6db508d03872d96ffddbc10f2")
  ("key-chord" . "7f7fd7c5bd2b996fa054779357e1566f7989e07d")
- ("leaf-keywords.el" . "d1075699551fd2d22a5f130906f09b6462264c48")
+ ("leaf-keywords.el" . "551ba03842e38fe6e3766ea5f858dd6669878c40")
  ("leaf.el" . "9eb18e8c9c375aa0158fbd06ea906bfbf54408fe")
  ("let-alist" . "592553db5929b54db40af0df90c5add0aaca045b")
  ("ligature.el" . "c0e696a88824be6afa1f33fad548d36f96801d8e")

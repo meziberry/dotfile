@@ -1,4 +1,4 @@
-;; radian-lib.el --- -*- lexical-binding: t -*-
+;; library.el --- -*- lexical-binding: t -*-
 
 ;;
 ;;; Some tiny function
@@ -832,3 +832,9 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
 (defalias '-mey* 'leaf-key-bind-keymap*)
 (defalias '-meys 'leaf-keys-bind-keymap)
 (defalias '-meys* 'leaf-keys-bind-keymap*)
+
+;; Local Variables:
+;; indent-tabs-mode: nil
+;; no-native-compile: t
+;; sentence-end-double-space: nil
+;; End:
