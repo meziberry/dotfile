@@ -1,4 +1,4 @@
-;;; nano-theme.el --- A theme split from nano-emacs  -*- lexical-binding: t; -*-
+;; nano-theme.el --- A theme split from nano-emacs  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2021 LiuBo
 
@@ -374,12 +374,12 @@
    ;; Font Locks
    `(font-lock-comment-face              ((,class :inherit italic :foreground ,faded)))
    `(font-lock-comment-delimiter-face    ((,class :inherit font-lock-comment-face)))
-   `(font-lock-keyword-face              ((,class (:foreground ,salient))))
-   `(font-lock-string-face               ((,class (:foreground ,popout))))
+   `(font-lock-keyword-face              ((,class (:foreground ,blue-intense))))
+   `(font-lock-string-face               ((,class (:foreground ,n/绿松))))
    `(font-lock-doc-face                  ((,class (:foreground ,faded))))
-   `(font-lock-builtin-face              ((,class :inherit bold :foreground ,n/咖米)))
-   `(font-lock-type-face                 ((,class :inherit bold :foreground ,n/酱貝)))
-   `(font-lock-variable-name-face        ((,class :foreground ,n/灰素)))
+   `(font-lock-builtin-face              ((,class :inherit bold :foreground ,salient)))
+   `(font-lock-type-face                 ((,class :inherit bold :foreground ,popout)))
+   `(font-lock-variable-name-face        ((,class :foreground ,magenta-alt)))
    `(font-lock-constant-face             ((,class (:foreground ,salient))))
    `(font-lock-function-name-face        ((,class (:foreground ,strong :underline t))))
    `(font-lock-warning-face              ((,class (:foreground ,n/红火))))

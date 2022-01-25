@@ -20,7 +20,7 @@ loading the init-file twice if it were not for this variable.")
  (t
   (setq radian--init-file-loaded-p t)
 
-  (defvar radian-minimum-emacs-version "26"
+  (defvar radian-minimum-emacs-version "27"
     "Radian Emacs does not support any Emacs version below this.")
 
   (defvar radian-local-init-file
@@ -33,6 +33,10 @@ loading the init-file twice if it were not for this variable.")
   ;; Prevent Custom from modifying this file.
   (setq custom-file (expand-file-name "etc/custom.el" user-emacs-directory))
   (load custom-file 'noerror 'nomessage)
+
+  ;; Disable frequency of GC during init, and after init shall be set
+  ;; properly. Value is in bytes
+  (setq gc-cons-threshold most-positive-fixnum)
 
   ;; Make sure we are running a modern enough Emacs, otherwise abort
   ;; init.
@@ -63,7 +67,7 @@ This file is loaded by init.el.")
         "Library file")
 
       (unless (file-exists-p radian-lib-file)
-        (error "Library file %S does not exist" radian-lib-file))
+        (error "Radian file %S does not exist" radian-lib-file))
 
       (defvar radian--finalize-init-hook nil
         "Hook run unconditionally after init, even if it fails.
@@ -92,9 +96,7 @@ init-file is loaded, not just once.")
                      radian-local-init-file
                      (concat radian-lib-file "c"))
                 (throw 'stale-bytecode nil))
-              (load
-               (file-name-sans-extension radian-lib-file)
-               nil 'nomessage)
+              (load (file-name-sans-extension radian-lib-file) nil 'nomessage)
               (setq stale-bytecode nil))
             (when stale-bytecode
               ;; Don't bother trying to recompile, unlike in

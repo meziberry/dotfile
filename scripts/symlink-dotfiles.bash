@@ -26,3 +26,10 @@ safe_link "$radian/emacs/early-init.el" "$HOME/.emacs.d/early-init.el"
 safe_link "$radian/emacs/init.el" "$HOME/.emacs.d/init.el"
 safe_link "$radian/emacs/versions.el" \
           "$HOME/.emacs.d/straight/versions/radian.el"
+# git
+safe_link "$radian/git/.gitconfig" "$HOME/.gitconfig"
+# shell
+safe_link "$radian/shell/.minttyrc" "$HOME/.minttyrc"
+safe_link "$radian/shell/shared/.profile" "$HOME/.profile"
+safe_link "$radian/shell/zsh/.zprofile" "$HOME/.zprofile"
+safe_link "$radian/shell/zsh/.zshrc" "$HOME/.zshrc"

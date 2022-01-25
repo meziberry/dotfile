@@ -1,25 +1,10 @@
-;; -*- coding: utf-8; lexical-binding: t -*-
+;; -*- coding: utf-8; lexical-binding: t; -*-
 
 ;; To see the outline of this file, run M-x outline-minor-mode and
 ;; then press C-c @ C-t. To also show the top-level functions and
 ;; variable declarations in each section, run M-x occur with the
 ;; following query: ^;;;;* \|^(
 
-;;; Comp
-(with-eval-after-load 'comp
-  ;; NOTE: Some variable is defined in `init.el', load it when
-  ;; native-comp-async. `defalias' will cause `native--compile-async'
-  ;; to compiling the file located.
-  (customize-set-variable
-   'native-comp-async-env-modifier-form
-   '(load (expand-file-name "init.el" user-emacs-directory) t t t))
-  (customize-set-variable 'native-comp-compiler-options '("-O2" "-mtune=native"))
-  ;; Disable byte-compilation warnings from native-compiled
-  ;; packages from being reported asynchronously into the UI.
-  (customize-set-variable 'native-comp-async-report-warnings-errors nil))
-
-;; emacs sartup process:
-;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Startup-Summary.html
 ;;; Detect stale bytecode
 ;; If Emacs version changed, the bytecode is no longer valid and we
 ;; must recompile. Also, if the location of Radian changed, our
@@ -31,11 +16,33 @@
                      (list (emacs-version) radian-lib-file)))
     (throw 'stale-bytecode nil)))
 
-;; Disable frequency of GC during init, and after init shall be set
-;; properly. Value is in bytes
-(setq gc-cons-threshold most-positive-fixnum)
+;;; Comp
+(defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
+
+(and
+ IS-NATIVECOMP
+ (with-eval-after-load 'comp
+   ;; NOTE: Some variable is defined in `init.el', load it when
+   ;; native-comp-async. `defalias' will cause `native--compile-async'
+   ;; to compiling the file located.
+   (customize-set-variable
+    'native-comp-async-env-modifier-form
+    '(load (expand-file-name "init.el" user-emacs-directory) t t t))
+   (customize-set-variable 'native-comp-compiler-options '("-O2" "-mtune=native"))
+   ;; Disable byte-compilation warnings from native-compiled
+   ;; packages from being reported asynchronously into the UI.
+   (customize-set-variable 'native-comp-async-report-warnings-errors nil)))
 
 ;;; Radian Variables/Hooks
+(defvar radian--current-feature 'core "The feature loading")
+
+(defconst IS-EMACS29+   (> emacs-major-version 28))
+(defconst IS-EMACS28+   (> emacs-major-version 27))
+(defconst IS-MAC        (eq system-type 'darwin))
+(defconst IS-LINUX      (eq system-type 'gnu/linux))
+(defconst IS-WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
+(defconst IS-BSD        (or IS-MAC (eq system-type 'berkeley-unix)))
+
 (defvar radian-debug-p (or (getenv-internal "DEBUG") init-file-debug)
   "If non-nil, Radian will log more.
 
@@ -47,16 +54,6 @@ setting the DEBUG envvar will enable this at startup.")
 
 (defvar radian-init-time nil
   "The time it took, in seconds, for Doom Emacs to initialize.")
-
-(defvar radian--current-feature 'core "The feature loading")
-
-(defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
-(defconst IS-EMACS29+   (> emacs-major-version 28))
-(defconst IS-EMACS28+   (> emacs-major-version 27))
-(defconst IS-MAC        (eq system-type 'darwin))
-(defconst IS-LINUX      (eq system-type 'gnu/linux))
-(defconst IS-WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
-(defconst IS-BSD        (or IS-MAC (eq system-type 'berkeley-unix)))
 
 ;; Directories/files
 (defconst *radian-directory* (file-name-directory
@@ -120,12 +117,9 @@ in daemon sessions (they are loaded immediately at startup).")
     (put var 'initial-value (default-value var))))
 
 ;; Custom error types
-(define-error 'radian-error "Error in Radian core")
-(define-error 'radian-hook-error "Error in a Radian startup hook" 'radian-error)
-(define-error 'radian-autoload-error "Error in Radian's autoloads file" 'radian-error)
-(define-error 'radian-module-error "Error in a Radian module" 'radian-error)
+(define-error 'radian-error "Error in Radian")
+(define-error 'radian-hook-error "Error in a Radian hook" 'radian-error)
 (define-error 'radian-local-error "Error in local config" 'radian-error)
-(define-error 'radian-package-error "Error with packages" 'radian-error)
 
 ;; Define Radian customization groups
 (defgroup radian-hooks nil
@@ -344,11 +338,10 @@ unexpected ways."
   (declare (indent (lambda (_ s) (goto-char (elt s 1)) (current-column))))
   (let ((func-name (intern (format "radian-local--%S" name)))
         (hook (intern (format "radian-%S-hook" name))))
-    `(progn
-       (add-hook! ',hook
-         (defun ,func-name ()
-           "Automatically-generated local hook function."
-           (eval (progn ,@body) lexical-binding))))))
+    `(add-hook! ',hook
+       (defun ,func-name ()
+         "Automatically-generated local hook function."
+         ,@body))))
 
 (defmacro radian--run-hook (name)
   "Run the given local init HOOK.
@@ -437,6 +430,8 @@ hook directly into the init-file during byte-compilation."
       (set-selection-coding-system 'utf-16-le))
   (set-selection-coding-system 'utf-8)
   (set-next-selection-coding-system 'utf-8))
+(when (fboundp 'set-charset-priority)
+  (set-charset-priority 'unicode))
 (prefer-coding-system 'utf-8-unix)
 (set-language-environment "UTF-8")
 (set-default-coding-systems 'utf-8-unix)
@@ -1264,47 +1259,98 @@ convert\" UTF8_STRING)'. Disable that."
   (regx-quiet! "Selection owner couldn't convert"
     (apply func args)))
 
-;;;; Mouse integration
-
-;; Scrolling is way too fast on macOS with Emacs 27 and on Linux in
-;; general. Decreasing the number of lines we scroll per mouse event
-;; improves the situation. Normally, holding shift allows this slower
-;; scrolling; instead, we make it so that holding shift accelerates
-;; the scrolling.
-(setq mouse-wheel-scroll-amount '(1 ((shift) . 5) ((control))))
-
-;; Mouse integration works out of the box in windowed mode but not
-;; terminal mode. The following code to fix it was based on
-;; <https://stackoverflow.com/a/8859057/3538165>.
-(unless (display-graphic-p)
-
-  ;; Enable basic mouse support (click and drag).
-  (xterm-mouse-mode t)
-
-  ;; Note that the reason for the next two functions is that
-  ;; `scroll-down' and `scroll-up' scroll by a "near full screen"
-  ;; by default, whereas we want a single line.
-
-  (eval-and-compile
-    (defun radian-scroll-down ()
-      "Scroll down one line."
-      (interactive)
-      (scroll-down 1))
-
-    (defun radian-scroll-up ()
-      "Scroll up one line."
-      (interactive)
-      (scroll-up 1)))
-
-  ;; Enable scrolling with the mouse wheel.
-  (-key "<mouse-4>" #'radian-scroll-down)
-  (-key "<mouse-5>" #'radian-scroll-up))
-
 ;;;; Window management
-
 ;; Prevent accidental usage of `list-buffers'.
 (-key "C-x C-b" #'switch-to-buffer)
 (-key "C-x b"   #'list-buffers)
+
+;; Feature `winner' provides an undo/redo stack for window
+;; configurations, with undo and redo being C-c left and C-c right,
+;; respectively. (Actually "redo" doesn't revert a single undo, but
+;; rather a whole sequence of them.) For instance, you can use C-x 1
+;; to focus on a particular window, then return to your previous
+;; layout with C-c left.
+(-ow winner
+  ;; undo/redo changes to Emacs' window layout
+  :preface (defvar winner-dont-bind-my-keys t) ; I'll bind keys myself
+  :hook radian-first-buffer-hook
+  :config
+  (appendq! winner-boring-buffers
+            '("*Compile-Log*" "*inferior-lisp*" "*Fuzzy Completions*"
+              "*Apropos*" "*Help*" "*cvs*" "*Buffer List*" "*Ibuffer*"
+              "*esh command on file*")))
+
+;; slip window
+(defun split-window-func-with-other-buffer (split-function)
+  (lambda (&optional arg)
+    "Split this window and switch to the new window unless ARG is provided."
+    (interactive "P")
+    (funcall split-function)
+    (let ((target-window (next-window)))
+      (set-window-buffer target-window (other-buffer))
+      (unless arg
+        (select-window target-window)))))
+
+(-keys
+ (("C-x C-)" . (split-window-func-with-other-buffer 'split-window-vertically))
+  ("C-x C-*" . (split-window-func-with-other-buffer 'split-window-horizontally))))
+
+(defun radian/toggle-delete-other-windows ()
+  "Delete other windows in frame if any, or restore previous window config."
+  (interactive)
+  (if (and winner-mode (equal (selected-window) (next-window)))
+      (winner-undo)
+    (delete-other-windows)))
+
+(-key "C-x C-(" #'radian/toggle-delete-other-windows)
+
+;; Rearrange split windows
+
+(defun split-window-horizontally-instead ()
+  "Kill any other windows and re-split such that the current window is on the top half of the frame."
+  (interactive)
+  (let ((other-buffer (and (next-window) (window-buffer (next-window)))))
+    (delete-other-windows)
+    (split-window-horizontally)
+    (when other-buffer
+      (set-window-buffer (next-window) other-buffer))))
+
+(defun split-window-vertically-instead ()
+  "Kill any other windows and re-split such that the current window is on the left half of the frame."
+  (interactive)
+  (let ((other-buffer (and (next-window) (window-buffer (next-window)))))
+    (delete-other-windows)
+    (split-window-vertically)
+    (when other-buffer
+      (set-window-buffer (next-window) other-buffer))))
+
+(-keys ("C-x |" . split-window-horizontally-instead)
+       ("C-x _" . split-window-vertically-instead))
+
+(defun radian/split-window()
+  "Split the window to see the most recent buffer in the other window.
+Call a second time to restore the original window configuration."
+  (interactive)
+  (if (eq last-command 'radian/split-window)
+      (progn
+        (jump-to-register :radian/split-window)
+        (setq this-command 'radian/unsplit-window))
+    (window-configuration-to-register :radian/split-window)
+    (switch-to-buffer-other-window nil)))
+
+(-key "<f7>" #'radian/split-window)
+
+(defun radian/toggle-current-window-dedication ()
+  "Toggle whether the current window is dedicated to its current buffer."
+  (interactive)
+  (let* ((window (selected-window))
+         (was-dedicated (window-dedicated-p window)))
+    (set-window-dedicated-p window (not was-dedicated))
+    (message "Window %sdedicated to %s"
+             (if was-dedicated "no longer " "")
+             (buffer-name))))
+
+(-key "C-c <down>" #'radian/toggle-current-window-dedication)
 
 (declare-function minibuffer-keyboard-quit "delsel")
 (defadvice! radian--advice-keyboard-quit-minibuffer-first
@@ -1361,14 +1407,14 @@ active minibuffer, even if the minibuffer is not selected."
   (shackle-rules
    .
    '((compilation-mode :select nil)
-     ("*help.*" :regexp t :hide-modeline t :other t :select nil :same nil :align shackle-align :size 0.5)))
+     ("*help.*" :regexp t :no-modeline t :other t :select nil :same nil :align shackle-align :size 0.5)))
 
   :config/el-patch
   (defun shackle--display-buffer (buffer alist plist)
     "Internal function for `shackle-display-buffer'.
 Displays BUFFER according to ALIST and PLIST."
-    ;; HACK: Add the :hide-modeline keyword for shackle-rules.
-    (when (plist-get plist :hide-modeline)
+    ;; HACK: Add the :no-modeline keyword for shackle-rules.
+    (when (plist-get plist :no-modeline)
       (push
        `(window-parameters
          .
@@ -1410,53 +1456,150 @@ Displays BUFFER according to ALIST and PLIST."
   (swsw-command-map ([?c] . swsw-delete))
   :custom
   (swsw-id-chars . '(?a ?o ?e ?u ?h ?t ?n ?s))
-  (swsw-scope . 'visible)
   (swsw-id-format . "%s")
+  (swsw-display-function . #'ignore)
+  :init
+  (defvar swsw-char-position 'bottom)
+  (defvar swsw--overlays nil)
+  (defvar swsw--empty-buffers-list nil)
+  (defvar swsw--windows-hscroll nil)
   :config
-  (swsw-mode-line-conditional-display-function t)
+  (customize-set-variable 'swsw-scope 'visible)
+  (defun swsw--point-visible-p ()
+    "Return non-nil if point is visible in the selected window.
+Return nil when horizontal scrolling has moved it off screen."
+    (and (>= (- (current-column) (window-hscroll)) 0)
+         (< (- (current-column) (window-hscroll))
+            (window-width))))
+  (defun swsw--remove-id-overlay ()
+    "Remove leading char overlays."
+    (mapc #'delete-overlay swsw--overlays)
+    (setq swsw--overlays nil)
+    (dolist (b swsw--empty-buffers-list)
+      (with-current-buffer b
+        (when (string= (buffer-string) " ")
+          (let ((inhibit-read-only t))
+            (delete-region (point-min) (point-max))))))
+    (setq swsw--empty-buffers-list nil)
+    (let (wnd hscroll)
+      (mapc (lambda (wnd-and-hscroll)
+              (setq wnd (car wnd-and-hscroll)
+                    hscroll (cdr wnd-and-hscroll))
+              (when (window-live-p wnd)
+                (set-window-hscroll wnd hscroll)))
+            swsw--windows-hscroll))
+    (setq swsw--windows-hscroll nil))
+  (defun swsw--display-id-overlay ()
+    "Create an overlay on every window."
+    ;; Properly adds overlay in visible region of most windows except for any one
+    ;; receiving output while this function is executing, since that moves point,
+    ;; potentially shifting the added overlay outside the window's visible region.
+    (cl-flet
+        ((swsw--id-overlay (wnd)
+           ;; Prevent temporary movement of point from scrolling any window.
+           (let ((scroll-margin 0))
+             (with-selected-window wnd
+               (when (= 0 (buffer-size))
+                 (push (current-buffer) swsw--empty-buffers-list)
+                 (let ((inhibit-read-only t))
+                   (insert " ")))
+               ;; If point is not visible due to horizontal scrolling of the
+               ;; window, this next expression temporarily scrolls the window
+               ;; right until point is visible, so that the leading-char can be
+               ;; seen when it is inserted.  When ace-window's action finishes,
+               ;; the horizontal scroll is restored.
+               (while (and (not (swsw--point-visible-p))
+                           (not (zerop (window-hscroll)))
+                           (progn (push (cons (selected-window) (window-hscroll))
+                                        swsw--windows-hscroll) t)
+                           (not (zerop (scroll-right)))))
+               (let* ((ws (window-start))
+                      (prev nil)
+                      (vertical-pos (if (eq swsw-char-position 'bottom) -1 0))
+                      (horizontal-pos (if (zerop (window-hscroll)) 0 (1+ (window-hscroll))))
+                      (old-pt (point))
+                      (pt
+                       (progn
+                         ;; If leading-char is to be displayed at the top-left, move
+                         ;; to the first visible line in the window, otherwise, move
+                         ;; to the last visible line.
+                         (move-to-window-line vertical-pos)
+                         (move-to-column horizontal-pos)
+                         ;; Find a nearby point that is not at the end-of-line but
+                         ;; is visible so have space for the overlay.
+                         (setq prev (1- (point)))
+                         (while (and (>= prev ws) (/= prev (point)) (eolp))
+                           (setq prev (point))
+                           (unless (bobp)
+                             (line-move -1 t)
+                             (move-to-column horizontal-pos)))
+                         (recenter vertical-pos)
+                         (point)))
+                      (ol (make-overlay pt (1+ pt) (window-buffer wnd))))
+                 (goto-char old-pt)
+                 (overlay-put ol 'display (swsw-format-id wnd))
+                 (overlay-put ol 'window wnd)
+                 (push ol swsw--overlays))))))
+      (walk-windows #'swsw--id-overlay nil (swsw--get-scope))))
+  ;; HACK: use overlay to display swsw id.
+  (add-hook 'swsw-before-command-hook #'swsw--display-id-overlay)
+  (add-hook 'swsw-after-command-hook #'swsw--remove-id-overlay)
 
+  ;; (if swsw-mode
+  ;;     (progn
+  ;;       (add-hook 'radian-switch-frame-hook #'swsw--update-frame)
+  ;;       (add-hook 'radian-switch-window-hook #'swsw--update))
+  ;;   (remove-hook 'radian-switch-frame-hook #'swsw--update-frame)
+  ;;   (remove-hook 'radian-switch-window-hook #'swsw--update))
   (defadvice! swsw-format-id-a (id)
     "Format an ID string for WINDOW."
     :filter-return #'swsw-format-id
-    (concat "["
-            (propertize
-             (upcase id)
-             'face
-             `(:foreground "deep pink" :weight extra-bold :height ,radian-font-size))
-            "]"))
+    (propertize
+     (upcase id)
+     'face
+     `(:foreground "deep pink" :weight extra-bold :height ,(+ 30 radian-font-size))))
 
   :blackout t)
 
-;; Feature `winner' provides an undo/redo stack for window
-;; configurations, with undo and redo being C-c left and C-c right,
-;; respectively. (Actually "redo" doesn't revert a single undo, but
-;; rather a whole sequence of them.) For instance, you can use C-x 1
-;; to focus on a particular window, then return to your previous
-;; layout with C-c left.
-(-ow! winner
-  ;; undo/redo changes to Emacs' window layout
-  :preface (defvar winner-dont-bind-my-keys t) ; I'll bind keys myself
-  :hook radian-first-buffer-hook
-  :config
-  (appendq! winner-boring-buffers
-            '("*Compile-Log*" "*inferior-lisp*" "*Fuzzy Completions*"
-              "*Apropos*" "*Help*" "*cvs*" "*Buffer List*" "*Ibuffer*"
-              "*esh command on file*")))
+;; Feature `windmove' provides keybindings S-left, S-right, S-up, and
+;; S-down to move between windows. This is much more convenient and
+;; efficient than using the default binding, C-x o, to cycle through
+;; all of them in an essentially unpredictable order.
+(-ow windmove
+  ;; Avoid using `windmove-default-keybindings' due to
+  ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=50430.
+  :bind
+  ("S-<left>"  . windmove-swap-states-left)
+  ("S-<right>" . windmove-swap-states-right)
+  ("S-<up>"    . windmove-swap-states-up)
+  ("S-<down>"  . windmove-swap-states-down))
 
 ;; Feature `ibuffer' provides a more modern replacement for the
 ;; `list-buffers' command.
-(-ow! ibuffer :bind (([remap list-buffers] . ibuffer)))
-
-;; Maximize buffer
-(defun toggle-maximize-buffer () "Maximize buffer"
-       (interactive)
-       (if (= 1 (length (window-list)))
-           (jump-to-register '_)
-         (progn
-           (window-configuration-to-register '_)
-           (delete-other-windows))))
-;;Map it to a key.
-(-key "tm" #'toggle-maximize-buffer 'radian-comma-keymap)
+(-ow ibuffer
+  :bind (([remap list-buffers] . ibuffer))
+  :config
+  (setq ibuffer-expert t)
+  (setq ibuffer-display-summary nil)
+  (setq ibuffer-use-other-window nil)
+  (setq ibuffer-show-empty-filter-groups nil)
+  (setq ibuffer-movement-cycle nil)
+  (setq ibuffer-default-sorting-mode 'filename/process)
+  (setq ibuffer-use-header-line t)
+  (setq ibuffer-default-shrink-to-minimum-size nil)
+  (setq ibuffer-formats
+        '((mark modified read-only locked " "
+                (name 40 40 :left :elide)
+                " "
+                (size 9 -1 :right)
+                " "
+                (mode 16 16 :left :elide)
+                " " filename-and-process)
+          (mark " "
+                (name 16 -1)
+                " " filename)))
+  (setq ibuffer-saved-filter-groups nil)
+  (setq ibuffer-old-time 48))
 
 ;;;;; ------------------------Head core ends here-----------------------------
 
@@ -1700,6 +1843,7 @@ completing-read prompter."
           ([?\t]      . isearch-complete-edit)
           ("\r"       . isearch-forward-exit-minibuffer))
          (isearch-mode-map
+          ([remap isearch-delete-char] . isearch-del-char)
           ("M-s -"    . isearch-toggle-symbol)
           ("M-s a"    . isearch-beginning-of-buffer)
           ("M-s e"    . isearch-end-of-buffer)
@@ -1709,9 +1853,13 @@ completing-read prompter."
           (","        . isearch-repeat-backward)
           ("."        . isearch-repeat-forward)
           ("/"        . isearch-edit-string)))
+
   :config
   (setq isearch-allow-motion t
-        isearch-motion-changes-direction t))
+        isearch-repeat-on-direction-change t
+        isearch-motion-changes-direction t)
+
+  :blackout t)
 
 ;;; MODULE {files}
 ;;;; Finding files
@@ -2197,13 +2345,15 @@ permission."
 (-ow! recentf
   :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
   :increment easymenu tree-widget timer
-  :custom (recentf-max-saved-items . 100)
+  :custom
+  (recentf-max-saved-items . 100)
+  (recentf-exclude . '(".gz" ".xz" ".zip" "/elpa/" "/ssh:" "/sudo:"))
+  ;; The most sensible time to clean up your recent files list is when you quit
+  ;; Emacs (unless this is a long-running daemon session).
+  `(recentf-auto-cleanup . ,(if (daemonp) 300 nil))
   :commands recentf-open-files
   ;; Set history-length longer
   :setq-default (history-length . 100)
-  ;; The most sensible time to clean up your recent files list is when you quit
-  ;; Emacs (unless this is a long-running daemon session).
-  :setq `(recentf-auto-cleanup . ,(if (daemonp) 300 nil))
   :config (add-hook 'kill-emacs-hook (lambda () (fn-quiet! #'recentf-cleanup))))
 
 ;;; MODULE {Editing}
@@ -2691,7 +2841,7 @@ buffer."
   (setq so-long-predicate #'radian-buffer-has-long-lines-p))
 
 ;;;; prettify
-(-ow! prog-mode
+(-ow prog-mode
   :init
   (defvar +ligatures-extras-in-modes t
     "List of major modes where extra ligatures should be enabled.
@@ -3008,7 +3158,7 @@ and cannot run in."
   ;; completions menu rather than cancelling the snippet and moving
   ;; the cursor while leaving the completions menu on-screen in the
   ;; same location.
-  (-ow! company
+  (-ow company
 
     :config
 
@@ -3074,7 +3224,7 @@ currently active.")
 ;;; MODULE {IDE features}
 ;;;; Virtual environments
 ;;;; xref
-(-ow! xref
+(-ow xref
   :custom
   (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
@@ -3293,8 +3443,7 @@ killed (which happens during Emacs shutdown)."
 (defadvice! radian--advice-indent-region-quietly (func &rest args)
   "Make `indent-region' shut up about its progress."
   :around #'indent-region
-  (regx-quiet! "Indenting region"
-    (apply func args)))
+  (regx-quiet! "Indenting region" (apply func args)))
 
 ;;;; Autocompletion
 
@@ -3370,10 +3519,15 @@ killed (which happens during Emacs shutdown)."
   ;; Make RET trigger a completion if and only if the user has
   ;; explicitly interacted with Company, instead of always
   ;; doing so.
-  ;; (bind-keys :map company-active-map
-  ;;            :filter company-explicit-action-p
-  ;;            ("<return>" . company-complete-selection)
-  ;;            ("RET" . company-complete-selection))
+  (-keys
+   (company-active-map
+    ("<return>" . (cmds! (company-explicit-action-p)
+                         #'company-complete-selection #'newline-and-indent))
+    ("RET" . (cmds! (company-explicit-action-p)
+                    #'company-complete-selection #'newline-and-indent))))
+
+  (customize-set-variable
+   'company-quick-access-keys '("a" "o" "e" "u" "i" "d" "h" "t" "s" "."))
 
   ;; Make completions display twice as soon.
   (setq company-idle-delay 0.15)
@@ -4861,11 +5015,11 @@ messages."
         org-priority-highest ?A
         org-priority-lowest ?E
         org-priority-faces
-        '((?A . 'all-the-icons-red)
-          (?B . 'all-the-icons-orange)
-          (?C . 'all-the-icons-yellow)
-          (?D . 'all-the-icons-green)
-          (?E . 'all-the-icons-blue)))
+        '((?A . 'org-habit-overdue-face)
+          (?B . 'org-habit-overdue-future-face)
+          (?C . 'org-habit-alert-face)
+          (?D . 'org-habit-ready-face)
+          (?E . 'org-habit-clear-future-face)))
 
   (setq org-agenda-deadline-faces
         '((1.001 . error)
@@ -5121,19 +5275,19 @@ In case of failure, fail gracefully."
            (org-roam-buffer-toggle))))
 
   (after! shackle
-    (cl-pushnew '("*org-roam*" :hide-modeline t :popup t :align right :size 0.22) shackle-rules))
+    (cl-pushnew '("*org-roam*" :no-modeline t :popup t :align right :size 0.22) shackle-rules))
 
   (add-hook 'org-roam-mode-hook #'turn-on-visual-line-mode))
 
 
 ;;;; Filesystem management
-
 ;; When deleting a file interactively, move it to the trash instead.
 (setq delete-by-moving-to-trash t)
 
 ;; Package `osx-trash' provides functionality that allows Emacs to
 ;; place files in the trash on macOS.
-(pow! osx-trash
+(pow osx-trash
+  :disabled (not (and IS-MAC (featurep! osx-trash)))
   :commands (osx-trash-move-file-to-trash)
   :init
 
@@ -5153,7 +5307,6 @@ non-nil value to enable trashing for file operations."
   (osx-trash-setup))
 
 ;;;;; Dired
-
 ;; Dired has some trouble parsing out filenames that have e.g. leading
 ;; spaces, unless the ls program used has support for Dired. GNU ls
 ;; has this support, so if it is available we tell Dired (and the
@@ -5171,12 +5324,10 @@ non-nil value to enable trashing for file operations."
 
 ;; Feature `dired' provides a simplistic filesystem manager in Emacs.
 (-ow! dired
-
-  :bind (dired-mode-map
-         ;; This binding is way nicer than ^. It's inspired by
-         ;; Sunrise Commander.
-         ("J" . dired-up-directory))
-  :bind* (("C-x w" . radian-rename-current-file))
+  ;; This binding is way nicer than ^. It's inspired by
+  ;; Sunrise Commander.
+  :bind (dired-mode-map ("J" . dired-up-directory))
+  :bind* ("C-x w" . radian-rename-current-file)
   :defer-config
 
   (defun radian-rename-current-file (newname)
@@ -5237,7 +5388,6 @@ the problematic case.)"
   (setq dired-auto-revert-buffer t))
 
 (-ow! dired-x
-
   :bind (;; Bindings for jumping to the current directory in Dired.
          ("C-x C-j" . dired-jump)
          ("C-x 4 C-j" . dired-jump-other-window))
@@ -5257,16 +5407,15 @@ are probably not going to be installed."
 
 
 ;; find-name-dired find stuff from different directory.
-(-ow! find-dired
-  :init (setq find-ls-option '("-print0 | xargs -0 ls -ld" . "-ld")))
+(-ow! find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
 
 ;;;; Terminal emulator
 
 ;; Feature `term' provides a workable, though slow, terminal emulator
 ;; within Emacs.
 (-ow! term
-  :bind (;; Allow usage of more commands from within the terminal.
-         term-raw-map
+  ;; Allow usage of more commands from within the terminal.
+  :bind (term-raw-map
          ("M-x" . execute-extended-command)
          ("C-h" . help-command)))
 
@@ -5278,19 +5427,11 @@ are probably not going to be installed."
 ;; Disable VC. This improves performance and disables some annoying
 ;; warning messages and prompts, especially regarding symlinks. See
 ;; https://stackoverflow.com/a/6190338/3538165.
-(exclude ";" (-ow! vc-hooks :config (setq vc-handled-backends nil)))
+(exclude "I USE VC" (-ow! vc-hooks :config (setq vc-handled-backends nil)))
 
 ;; Feature `smerge-mode' provides an interactive mode for visualizing
 ;; and resolving Git merge conflicts.
 (-ow! smerge-mode :blackout t)
-
-;; Package `transient' is the interface used by Magit to display
-;; popups.
-
-;; Allow using `q' to quit out of popups, in addition to `C-g'. See
-;; <https://magit.vc/manual/transient.html#Why-does-q-not-quit-popups-anymore_003f>
-;; for discussion.
-(pow! transient :defer-config (transient-bind-q-to-quit))
 
 ;; Package `magit' provides a full graphical interface for Git within
 ;; Emacs.
@@ -5591,20 +5732,15 @@ changes, which means that `git-gutter' needs to be re-run.")
   (pow! git-gutter-fringe
     :after git-gutter
     :init
-
-    (-ow! git-gutter
-      :config
-
-      ;; This function is only available when Emacs is built with
-      ;; X/Cocoa support, see e.g.
-      ;; <https://github.com/pft/mingus/issues/5>. If we try to
-      ;; load/configure `git-gutter-fringe' without it, we run into
-      ;; trouble.
-      (when (fboundp 'define-fringe-bitmap)
-        (require 'git-gutter-fringe)))
+    ;; This function is only available when Emacs is built with
+    ;; X/Cocoa support, see e.g.
+    ;; <https://github.com/pft/mingus/issues/5>. If we try to
+    ;; load/configure `git-gutter-fringe' without it, we run into
+    ;; trouble.
+    (when (fboundp 'define-fringe-bitmap)
+      (require 'git-gutter-fringe))
 
     :config
-
     (fringe-helper-define 'radian--git-gutter-blank nil
       "........"
       "........"
@@ -5627,23 +5763,18 @@ Instead, display simply a flat colored region in the fringe."
         (apply func args)))))
 
 ;;;; Internet applications
-
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
 (exclude "WIP"
 (-ow! browse-url
-
+  :bind ("C-c C-o" . (cmds! (radian--browse-url-predicate) #'browse-url-at-point))
   :init
-
   (defun radian--browse-url-predicate ()
     "Return non-nil if \\[browse-url-at-point] should be rebound."
     ;; All of these major modes provide more featureful bindings for
     ;; C-c C-o than `browse-url-at-point'.
     (not (derived-mode-p
           #'markdown-mode #'org-mode #'org-agenda-mode #'magit-mode)))))
-
-;; (bind-key "C-c C-o" #'browse-url-at-point global-map
-;;           #'radian--browse-url-predicate)
 
 ;;;; Emacs profiling
 
@@ -5686,9 +5817,8 @@ Instead, display simply a flat colored region in the fringe."
               (defvar radian--currently-profiling-p t)
 
               ;; Abbreviated (and flattened) version of init.el.
-              (defvar radian-minimum-emacs-version "27.2")
-              (defvar radian-local-init-file
-                (expand-file-name "init.local.el" user-emacs-directory))
+              (defvar radian-minimum-emacs-version ,radian-minimum-emacs-version)
+              (defvar radian-local-init-file ,radian-local-init-file)
               (setq package-enable-at-startup nil)
               (setq custom-file
                     (expand-file-name
@@ -5926,7 +6056,8 @@ No tab will created if the command is cancelled."
               (setq succ t)))
         (unless succ
           (tab-bar-close-tab)))))
-  (tab-bar-mode +1))
+  (tab-bar-mode -1)
+  (tab-bar-history-mode +1))
 
 ;;;; outline-minor-faces
 (pow! outline-minor-faces
@@ -5994,6 +6125,7 @@ No tab will created if the command is cancelled."
 
 ;;;; pulse.el
 (-ow! pulse
+  :defvar pulse-delay
   :config
   (defface radian-pulse-line
     '((default :extend t)
@@ -6006,9 +6138,9 @@ No tab will created if the command is cancelled."
   (defun pulse-line (&rest _)
     "Pulse the current line."
     (interactive)
-    (let ((pulse-delay 0.05)
-          (start (if (eobp) (line-beginning-position 0) (line-beginning-position)))
+    (let ((start (if (eobp) (line-beginning-position 0) (line-beginning-position)))
           (end (line-beginning-position 2))
+          (pulse-delay 0.05)
           (face 'radian-pulse-line))
       (pulse-momentary-highlight-region start end face)))
 
@@ -6047,7 +6179,7 @@ No tab will created if the command is cancelled."
 
 
 ;;;;; --------------------------Tail core start here---------------------------
-;;;; initial frame appearance
+;;;; Appearance
 (if (display-graphic-p)
     (appendq! initial-frame-alist
               '((tool-bar-lines . 0)
@@ -6133,8 +6265,31 @@ turn it off again after creating the first frame."
       ;; for tall lines.
       auto-window-vscroll nil
       ;; mouse
-      mouse-wheel-scroll-amount '(2 ((shift) . hscroll))
+      mouse-wheel-scroll-amount '(1 ((shift) . hscroll))
       mouse-wheel-scroll-amount-horizontal 2)
+
+;; Mouse integration works out of the box in windowed mode but not
+;; terminal mode. The following code to fix it was based on
+;; <https://stackoverflow.com/a/8859057/3538165>.
+(unless (display-graphic-p)
+  ;; Enable basic mouse support (click and drag).
+  (xterm-mouse-mode t)
+  ;; Note that the reason for the next two functions is that
+  ;; `scroll-down' and `scroll-up' scroll by a "near full screen"
+  ;; by default, whereas we want a single line.
+  (eval-and-compile
+    (defun radian-scroll-down ()
+      "Scroll down one line."
+      (interactive)
+      (scroll-down 1))
+    (defun radian-scroll-up ()
+      "Scroll up one line."
+      (interactive)
+      (scroll-up 1)))
+
+  ;; Enable scrolling with the mouse wheel.
+  (-key "<mouse-4>" #'radian-scroll-down)
+  (-key "<mouse-5>" #'radian-scroll-up))
 
 ;; Remove hscroll-margin in shells, otherwise it causes jumpiness
 (setq-hook! '(eshell-mode-hook term-mode-hook) hscroll-margin 0)
@@ -6163,130 +6318,13 @@ turn it off again after creating the first frame."
 (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
 
 ;;;; Fonts
-(defvar radian-font (font-spec :family "Microsoft Yahei")
-  "The default font to use.
-Must be a `font-spec', a font object, an XFT font string, or an XLFD string.
-
-This affects the `default' and `fixed-pitch' faces.
-
-The properties except :family are all ignored.
-
-Examples:
-  (setq radian-font (font-spec :family \"Fira Mono\"))
-  (setq radian-font \"Terminus (TTF):antialias=off\")")
-
-(defvar radian-font-size 98 "The `height' property of radian fontset ")
-
-(defvar radian-variable-pitch-font nil
-  "The default font to use for variable-pitch text.
-Must be a `font-spec', a font object, an XFT font string, or an XLFD string. See
-`radian-font' for examples.
-
-An omitted font size means to inherit `radian-font''s size.")
-
-(defvar radian-serif-font nil
-  "The default font to use for the `fixed-pitch-serif' face.
-Must be a `font-spec', a font object, an XFT font string, or an XLFD string. See
-`radian-font' for examples.
-
-An omitted font size means to inherit `radian-font''s size.")
-
-(defvar radian-unicode-font nil
-  "Fallback font for Unicode glyphs.
-Must be a `font-spec', a font object, an XFT font string, or an XLFD string. See
-`radian-font' for examples.
-
-The defaults on macOS and Linux are Apple Color Emoji and Symbola, respectively.
-
-WARNING: if you specify a size for this font it will hard-lock any usage of this
-font to that size. It's rarely a good idea to do so!")
-
-(defvar radian-emoji-fallback-font-families
-  '("Apple Color Emoji"
-    "Segoe UI Emoji"
-    "Noto Color Emoji"
-    "Noto Emoji")
-  "A list of fallback font families to use for emojis.")
-
-(defvar radian-symbol-fallback-font-families
-  '("Symbola"
-    "Segoe UI Symbol"
-    "Apple Symbols")
-  "A list of fallback font families for general symbol glyphs.")
-
-(defvar radian-cjk-fallback-font-families
-  '("WenQuanYi Micro Hei Mono"
-    "Microsoft YaHei")
-  "A list of fallback font families to use for emojis.")
-
-(defun radian-init-font-h (&optional reload)
-  "Loads `fonts'"
-  (when (fboundp 'set-fontset-font)
-    (let ((fn (radian-partial (lambda (font) (find-font (font-spec :name font))))))
-      (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
-        (set-fontset-font t 'symbol font))
-      (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
-        (set-fontset-font t 'emoji font nil 'append))
-      (when radian-unicode-font
-        (set-fontset-font t 'unicode radian-unicode-font nil 'append))
-      (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
-        ;; 汉字Unicode范围
-        (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend))))
-
-  ;; ;; Set CJK font. but upper 'han setting is suffice for me.
-  ;; (dolist (script '(kana han cjk-misc bopomofo))
-  ;;   (set-fontset-font (frame-parameter nil 'font)
-  ;;                     script (font-spec :family "<CJK font name>")))
-
-  (apply #'custom-set-faces
-         (let ((attrs '(:weight unspecified :slant unspecified :width unspecified)))
-           (append (when radian-font
-                     `((fixed-pitch ((t (:font ,radian-font ,@attrs))))))
-                   (when radian-serif-font
-                     `((fixed-pitch-serif ((t (:font ,radian-serif-font ,@attrs))))))
-                   (when radian-variable-pitch-font
-                     `((variable-pitch ((t (:font ,radian-variable-pitch-font ,@attrs)))))))))
-  ;; Never save these settings to `custom-file'
-  (dolist (sym '(fixed-pitch fixed-pitch-serif variable-pitch))
-    (put sym 'saved-face nil))
-
-  ;;  FIXME: During initialize. this way cannot chang the font
-  ;; height. I don't know why.
-  (set-face-attribute 'default nil :height radian-font-size)
-
-  (if (or reload (daemonp)) (set-frame-font radian-font t t t))
-  ;; I avoid `set-frame-font' at startup because it is expensive; doing extra,
-  ;; unnecessary work we can avoid by setting the frame parameter directly.
-  (setf (alist-get 'font default-frame-alist)
-        (cond ((stringp radian-font)
-               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*" radian-font radian-font-size))
-              ((fontp radian-font)
-               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*"
-                       (font-get radian-font :family) radian-font-size))
-              ((signal 'wrong-type-argument (list '(fontp stringp) radian-font))))))
+(req! conf-font)
 
 ;;;; Mode line
-
 (-ow! recursion-indicator
   :straight (recursion-indicator :host github :repo "minad/recursion-indicator")
   :custom (recursion-indicator-minibuffer . "⮜")
   :init (recursion-indicator-mode +1))
-
-;; The following code customizes the mode line to something like:
-;; NORMAL [*] radian.el   18% (18,0)     radian:develop*  (Emacs-Lisp)
-(exclude "not-useing"
-(defun radian-mode-line-buffer-modified-status ()
-  "Return a mode line construct indicating buffer modification status.
-This is [*] if the buffer has been modified and whitespace
-otherwise. (Non-file-visiting buffers are never considered to be
-modified.) It is shown in the same color as the buffer name, i.e.
-`mode-line-buffer-id'."
-  (propertize
-   (if (and (buffer-modified-p)
-            (buffer-file-name))
-       "[*]"
-     "   ")
-   'face 'mode-line-buffer-id)))
 
 ;; Normally the buffer name is right-padded with whitespace until it
 ;; is at least 12 characters. This is a waste of space, so we
@@ -6320,13 +6358,9 @@ spaces."
     (setq index (1+ index))))
 
 (defcustom radian-mode-line-left
-  '(""
-    (:eval (when (featurep 'meow) (meow-indicator)))
-    " "
+  '(" "
     mode-line-mule-info
     "%*" "%@"
-    ;; Show [*] if the buffer is modified.
-    ;; (:eval (radian-mode-line-buffer-modified-status))
     "  "
     ;; Show the name of the current buffer.
     mode-line-buffer-identification
@@ -6335,15 +6369,17 @@ spaces."
     mode-line-position
     ;; Show the active major and minor modes.
     " "
-    (vc-mode vc-mode)
-    " "
     mode-line-modes
     mode-line-misc-info)
   "Composite mode line construct to be shown left-aligned."
   :type 'sexp)
 
 (defcustom radian-mode-line-right          ;⊙_⚆⚈☭
-  '("")
+  '(""
+    (vc-mode vc-mode)
+    " "
+    (:eval (when (featurep 'meow) (meow-indicator)))
+    " ")
   "Composite mode line construct to be shown right-aligned."
   :type 'sexp)
 
@@ -6369,14 +6405,14 @@ spaces."
 (defun xah-show-formfeed-as-line (&optional frame)
   "Display the formfeed ^L char as line."
   (interactive)
-  (letf! ((defun pretty-formfeed-line (window)
-            (with-current-buffer (window-buffer window)
-              (with-selected-window window
-                (when (not buffer-display-table)
-                  (setq buffer-display-table (make-display-table)))
-                (aset buffer-display-table ?\^L
-                      (vconcat (make-list 70 (make-glyph-code ?─ 'font-lock-comment-face))))
-                (redraw-frame)))))
+  (letf! (defun pretty-formfeed-line (window)
+           (with-current-buffer (window-buffer window)
+             (with-selected-window window
+               (when (not buffer-display-table)
+                 (setq buffer-display-table (make-display-table)))
+               (aset buffer-display-table ?\^L
+                     (vconcat (make-list 70 (make-glyph-code ?─ 'font-lock-comment-face))))
+               (redraw-frame))))
     (unless (minibufferp)
       (mapc 'pretty-formfeed-line (window-list frame 'no-minibuffer)))))
 
@@ -6710,6 +6746,7 @@ the unwritable tidbits."
 (-key "M-h" #'radian/change-theme)
 
 ;;; Closing
+(setq radian--current-feature 'normal)
 
 (unless (or mini-p (bound-and-true-p radian--currently-profiling-p))
   ;; Prune the build cache for straight.el; this will prevent it from
