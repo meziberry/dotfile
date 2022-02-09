@@ -68,11 +68,11 @@
     :end_export    "⯬"
     :properties    "⚙"
     :end           "∎"
-    :priority_a   ,(propertize "⚑" 'face 'all-the-icons-red)
-    :priority_b   ,(propertize "⬆" 'face 'all-the-icons-orange)
-    :priority_c   ,(propertize "■" 'face 'all-the-icons-yellow)
-    :priority_d   ,(propertize "⬇" 'face 'all-the-icons-green)
-    :priority_e   ,(propertize "❓" 'face 'all-the-icons-blue))
+    :priority_a   ,(propertize "⚑" 'face 'org-habit-overdue-face)
+    :priority_b   ,(propertize "⬆" 'face 'org-habit-overdue-future-face)
+    :priority_c   ,(propertize "■" 'face 'org-habit-alert-face)
+    :priority_d   ,(propertize "⬇" 'face 'org-habit-ready-face)
+    :priority_e   ,(propertize "❓" 'face 'org-habit-clear-future-face))
   "Maps identifiers to symbols, recognized by `set-ligatures'.
 
 This should not contain any symbols from the Unicode Private Area! There is no

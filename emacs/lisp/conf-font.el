@@ -63,7 +63,7 @@ font to that size. It's rarely a good idea to do so!")
       (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
         (set-fontset-font t 'symbol font))
       (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
-        (set-fontset-font t 'emoji font nil 'append))
+        (eval-when! IS-EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
       (when radian-unicode-font
         (set-fontset-font t 'unicode radian-unicode-font nil 'append))
       (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))

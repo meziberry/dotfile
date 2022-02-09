@@ -13,24 +13,47 @@
 
 (defun +org-init-appearance-h ()
   "Configures the UI for `org-mode'."
-  (setq ;;org-indirect-buffer-display #'current-window
+  (setq ;org-indirect-buffer-display #'current-window
+   ;; When you create a sparse tree and `org-indent-mode' is enabled,
+   ;; the highlighting destroys the invisibility added by
+   ;; `org-indent-mode'. Therefore, don't highlight when creating a
+   ;; sparse tree.
+   org-highlight-sparse-tree-matches nil
    org-eldoc-breadcrumb-separator " → "
+   ;; Show headlines but not content by default.
+   org-startup-folded 'content
+   ;; Make it possible to dim or hide blocked tasks in the agenda view.
    org-enforce-todo-dependencies t
    org-entities-user
    '(("flat"  "\\flat" nil "" "" "266D" "♭")
      ("sharp" "\\sharp" nil "" "" "266F" "♯"))
    org-fontify-done-headline t
    org-fontify-quote-and-verse-blocks t
+   org-archive-subtree-save-file-p t
    org-fontify-whole-heading-line t
    org-hide-leading-stars t
    org-image-actual-width nil
    org-imenu-depth 8
+   ;; Global ID state means we can have ID links anywhere. This is required for
+   ;; `org-brain', however.
+   org-id-locations-file-relative t
+   ;; Prevent modifications made in invisible sections of an org document, as
+   ;; unintended changes can easily go unseen otherwise.
+   org-catch-invisible-edits 'smart
+   ;; Don't number headings with these tags
+   org-num-face '(:inherit org-special-keyword :underline nil :weight bold)
+   org-num-skip-tags '("noexport" "nonum")
    ;; Sub-lists should have different bullets
    org-list-demote-modify-bullet '(("+" . "-") ("-" . "+") ("*" . "+") ("1." . "a."))
+   org-ellipsis " ▾ "
+   org-priority-highest ?A
+   org-priority-lowest ?E
    org-priority-faces
-   '((?A . error)
-     (?B . warning)
-     (?C . success))
+   '((?A . 'org-habit-overdue-face)
+     (?B . 'org-habit-overdue-future-face)
+     (?C . 'org-habit-alert-face)
+     (?D . 'org-habit-ready-face)
+     (?E . 'org-habit-clear-future-face))
    org-startup-indented t
    org-tags-column 0
    org-use-sub-superscripts '{})
@@ -185,12 +208,15 @@
 
   ;; Add inline image previews for attachment links
   (org-link-set-parameters "attachment" :image-data-fun #'+org-inline-image-data-fn))
+
 (defvar +org-babel-native-async-langs '(python)
   "Languages that will use `ob-comint' instead of `ob-async' for `:async'.")
 
 (eval-when-compile
   (defvar ob-async-no-async-languages-alist)
   (defvar +org-babel-mode-alist) )
+
+(exclude "I don't use babel"
 (defun +org-init-babel-h ()
   (setq org-src-preserve-indentation t  ; use native major-mode indentation
         org-src-tab-acts-natively t     ; we do this ourselves
@@ -275,7 +301,19 @@ Also adds support for a `:sync' parameter to override `:async'."
 
   ;; Refresh inline images after executing src blocks (useful for plantuml or
   ;; ipython, where the result could be an image)
-  (add-hook 'org-babel-after-execute-hook #'org-redisplay-inline-images)
+  (add-hook! 'org-babel-after-execute-hook
+    (defun +org-redisplay-inline-images-in-babel-result-h ()
+      (unless (or
+               ;; ...but not while Emacs is exporting an org buffer (where
+               ;; `org-display-inline-images' can be awfully slow).
+               (bound-and-true-p org-export-current-backend)
+               ;; ...and not while tangling org buffers (which happens in a temp
+               ;; buffer where `buffer-file-name' is nil).
+               (string-match-p "^ \\*temp" (buffer-name)))
+        (save-excursion
+          (when-let ((beg (org-babel-where-is-src-block-result))
+                     (end (progn (goto-char beg) (forward-line) (org-babel-result-end))))
+            (org-display-inline-images nil nil (min beg end) (max beg end)))))))
 
   (after! python
     (setq org-babel-python-command python-shell-interpreter))
@@ -286,51 +324,51 @@ Also adds support for a `:sync' parameter to override `:async'."
       (setq org-ditaa-jar-path     (expand-file-name "scripts/ditaa.jar")
             org-ditaa-eps-jar-path (expand-file-name "scripts/DitaaEps.jar")))))
 
-(defvar +org-babel-load-functions ()
-  "A list of functions executed to load the current executing src block. They
+ (defvar +org-babel-load-functions ()
+   "A list of functions executed to load the current executing src block. They
 take one argument (the language specified in the src block, as a string). Stops
 at the first function to return non-nil.")
 
-(defun +org-init-babel-lazy-loader-h ()
-  "Load babel libraries lazily when babel blocks are executed."
-  (defun +org--babel-lazy-load (lang &optional async)
-    (cl-check-type lang (or symbol null))
-    (unless (cdr (assq lang org-babel-load-languages))
-      (when async
-        ;; ob-async has its own agenda for lazy loading packages (in the child
-        ;; process), so we only need to make sure it's loaded.
-        (require 'ob-async nil t))
-      (prog1 (or (run-hook-with-args-until-success '+org-babel-load-functions lang)
-                 (require (intern (format "ob-%s" lang)) nil t)
-                 (require lang nil t))
-        (add-to-list 'org-babel-load-languages (cons lang t)))))
+ (defun +org-init-babel-lazy-loader-h ()
+   "Load babel libraries lazily when babel blocks are executed."
+   (defun +org--babel-lazy-load (lang &optional async)
+     (cl-check-type lang (or symbol null))
+     (unless (cdr (assq lang org-babel-load-languages))
+       (when async
+         ;; ob-async has its own agenda for lazy loading packages (in the child
+         ;; process), so we only need to make sure it's loaded.
+         (require 'ob-async nil t))
+       (prog1 (or (run-hook-with-args-until-success '+org-babel-load-functions lang)
+                  (require (intern (format "ob-%s" lang)) nil t)
+                  (require lang nil t))
+         (add-to-list 'org-babel-load-languages (cons lang t)))))
 
-  (defadvice! +org--export-lazy-load-library-h ()
-    "Lazy load a babel package when a block is executed during exporting."
-    :before #'org-babel-exp-src-block
-    (+org--babel-lazy-load-library-a (org-babel-get-src-block-info)))
+   (defadvice! +org--export-lazy-load-library-h ()
+     "Lazy load a babel package when a block is executed during exporting."
+     :before #'org-babel-exp-src-block
+     (+org--babel-lazy-load-library-a (org-babel-get-src-block-info)))
 
-  (defadvice! +org--src-lazy-load-library-a (lang)
-    "Lazy load a babel package to ensure syntax highlighting."
-    :before #'org-src--get-lang-mode
-    (or (cdr (assoc lang org-src-lang-modes))
-        (+org--babel-lazy-load lang)))
+   (defadvice! +org--src-lazy-load-library-a (lang)
+     "Lazy load a babel package to ensure syntax highlighting."
+     :before #'org-src--get-lang-mode
+     (or (cdr (assoc lang org-src-lang-modes))
+         (+org--babel-lazy-load lang)))
 
-  ;; This also works for tangling
-  (defadvice! +org--babel-lazy-load-library-a (info)
-    "Load babel libraries lazily when babel blocks are executed."
-    :after-while #'org-babel-confirm-evaluate
-    (let* ((lang (nth 0 info))
-           (lang (cond ((symbolp lang) lang)
-                       ((stringp lang) (intern lang))))
-           (lang (or (cdr (assq lang +org-babel-mode-alist))
-                     lang)))
-      (+org--babel-lazy-load
-       lang (and (not (assq :sync (nth 2 info)))
-                 (assq :async (nth 2 info))))
-      t))
+   ;; This also works for tangling
+   (defadvice! +org--babel-lazy-load-library-a (info)
+     "Load babel libraries lazily when babel blocks are executed."
+     :after-while #'org-babel-confirm-evaluate
+     (let* ((lang (nth 0 info))
+            (lang (cond ((symbolp lang) lang)
+                        ((stringp lang) (intern lang))))
+            (lang (or (cdr (assq lang +org-babel-mode-alist))
+                      lang)))
+       (+org--babel-lazy-load
+        lang (and (not (assq :sync (nth 2 info)))
+                  (assq :async (nth 2 info))))
+       t))
 
-  (advice-add #'org-babel-do-load-languages :override #'ignore))
+   (advice-add #'org-babel-do-load-languages :override #'ignore)))
 
 (defvar +org-capture-todo-file "todo.org"
   "Default target for todo entries.
@@ -707,7 +745,6 @@ can grow up to be fully-fledged org-mode buffers."
   (add-hook 'radian-delete-backward-functions
             #'+org-delete-backward-char-and-realign-table-maybe-h))
 
-(exclude "WIP"
 (defun +org-init-popup-rules-h ()
   (set-popup-rules!
    '(("^\\*Org Links" :slot -1 :vslot -1 :size 2 :ttl 0)
@@ -715,50 +752,46 @@ can grow up to be fully-fledged org-mode buffers."
       :slot -1 :vslot -1 :size #'+popup-shrink-to-fit :ttl 0)
      ("^\\*Org \\(?:Select\\|Attach\\)" :slot -1 :vslot -2 :ttl 0 :size 0.25)
      ("^\\*Org Agenda"     :ignore t)
-     ("^\\*Org Src"        :size 0.4  :quit nil :select t :autosave t :modeline t :ttl nil)
+     ("^\\*Org Src"        :size 0.42  :quit nil :select t :autosave t :modeline t :ttl nil)
      ("^\\*Org-Babel")
-     ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.25 :quit nil :select t :autosave ignore)))))
-
-(defun +org-init-protocol-h ()
-  ;; TODO org-board or better link grabbing support
-  ;; TODO org-capture + org-protocol instead of bin/org-capture
-  )
+     ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.42 :quit nil :select t :autosave ignore))))
 
 (defun +org-init-smartparens-h ()
   ;; Disable the slow defaults
   (provide 'smartparens-org))
 
+(exclude "NOT USE"
 (defun +org-init-protocol-lazy-loader-h ()
-  "Brings lazy-loaded support for org-protocol, so external programs (like
+   "Brings lazy-loaded support for org-protocol, so external programs (like
 browsers) can invoke specialized behavior from Emacs. Normally you'd simply
 require `org-protocol' and use it, but the package loads all of org for no
 compelling reason, so..."
-  (defadvice! +org--server-visit-files-a (args)
-    "Advise `server-visit-flist' to invoke `org-protocol' lazily."
-    :filter-args #'server-visit-files
-    (cl-destructuring-bind (files proc &optional nowait) args
-      (catch 'greedy
-        (let ((flist (reverse files)))
-          (dolist (var flist)
-            (when (string-match-p ":/+" (car var))
-              (require 'server)
-              (require 'org-protocol)
-              ;; `\' to `/' on windows
-              (let ((fname (org-protocol-check-filename-for-protocol
-                            (expand-file-name (car var))
-                            (member var flist)
-                            proc)))
-                (cond ((eq fname t) ; greedy? We need the t return value.
-                       (setq files nil)
-                       (throw 'greedy t))
-                      ((stringp fname) ; probably filename
-                       (setcar var fname))
-                      ((setq files (delq var files)))))))))
-      (list files proc nowait)))
+   (defadvice! +org--server-visit-files-a (args)
+     "Advise `server-visit-flist' to invoke `org-protocol' lazily."
+     :filter-args #'server-visit-files
+     (cl-destructuring-bind (files proc &optional nowait) args
+       (catch 'greedy
+         (let ((flist (reverse files)))
+           (dolist (var flist)
+             (when (string-match-p ":/+" (car var))
+               (require 'server)
+               (require 'org-protocol)
+               ;; `\' to `/' on windows
+               (let ((fname (org-protocol-check-filename-for-protocol
+                             (expand-file-name (car var))
+                             (member var flist)
+                             proc)))
+                 (cond ((eq fname t) ; greedy? We need the t return value.
+                        (setq files nil)
+                        (throw 'greedy t))
+                       ((stringp fname) ; probably filename
+                        (setcar var fname))
+                       ((setq files (delq var files)))))))))
+       (list files proc nowait)))
 
-  ;; Disable built-in, clumsy advice
-  (after! org-protocol
-    (ad-disable-advice 'server-visit-files 'before 'org-protocol-detect-protocol-server)))
+   ;; Disable built-in, clumsy advice
+   (after! org-protocol
+     (ad-disable-advice 'server-visit-files 'before 'org-protocol-detect-protocol-server))))
 
 ;; Set to nil so we can detect user changes to them later (and fall back on
 ;; defaults otherwise).
@@ -803,8 +836,8 @@ compelling reason, so..."
   (+org-init-appearance-h)
   (+org-init-agenda-h)
   (+org-init-attachments-h)
-  (+org-init-babel-h)
-  (+org-init-babel-lazy-loader-h)
+  ;; (+org-init-babel-h)
+  ;; (+org-init-babel-lazy-loader-h)
   (+org-init-capture-defaults-h)
   (+org-init-capture-frame-h)
   (+org-init-custom-links-h)
@@ -812,9 +845,9 @@ compelling reason, so..."
   (+org-init-habit-h)
   (+org-init-hacks-h)
   (+org-init-keybinds-h)
-  ;;+org-init-popup-rules-h
-  (+org-init-protocol-h)
-  (+org-init-protocol-lazy-loader-h)
+  (+org-init-popup-rules-h)
+  ;; (+org-init-protocol-h)
+  ;; (+org-init-protocol-lazy-loader-h)
   (+org-init-smartparens-h))
 
 ;; (Re)activate eldoc-mode in org-mode a little later, because it disables

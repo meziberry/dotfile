@@ -375,7 +375,7 @@ See `general-key-dispatch' for what other arguments it accepts in BRANCHES."
 ;;;; Mutation
 (defmacro appendq! (sym &rest lists)
   "Append LISTS to SYM in place."
-  `(setq ,sym (append ,sym ,@lists)))
+  `(setq ,sym (seq-uniq (append ,sym ,@lists))))
 
 (defmacro setq! (&rest settings)
   "A stripped-down `customize-set-variable' with the syntax of `setq'.
@@ -407,7 +407,7 @@ This is a variadic `cl-pushnew'."
 
 (defmacro prependq! (sym &rest lists)
   "Prepend LISTS to SYM in place."
-  `(setq ,sym (append ,@lists ,sym)))
+  `(setq ,sym (seq-uniq (append ,@lists ,sym))))
 
 
 ;;;; loading
@@ -821,6 +821,10 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
 
 (defalias '-ow #'leaf)
 (put '-ow 'lisp-indent-function 1)
+
+(defmacro --w (name &rest args)
+  "Like `-ow' except :loading is nil"
+  (declare (indent 1)) `(leaf ,name :loading nil ,@args))
 
 (defalias 'sup #'straight-use-package)
 

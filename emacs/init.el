@@ -63,9 +63,6 @@ loading the init-file twice if it were not for this variable.")
         "File containing main Radian configuration.
 This file is loaded by init.el.")
 
-      (defvar library-file (concat (file-name-directory radian-lib-file) "library.el")
-        "Library file")
-
       (unless (file-exists-p radian-lib-file)
         (error "Radian file %S does not exist" radian-lib-file))
 
