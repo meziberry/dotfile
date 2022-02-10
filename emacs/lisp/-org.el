@@ -32,6 +32,8 @@
    org-archive-subtree-save-file-p t
    org-fontify-whole-heading-line t
    org-hide-leading-stars t
+   org-hide-emphasis-markers t
+   org-pretty-entities t
    org-image-actual-width nil
    org-imenu-depth 8
    ;; Global ID state means we can have ID links anywhere. This is required for
@@ -137,16 +139,22 @@
     :em_dash       "---"
     :ellipsis      "..."
     :title         "#+title:"
+    :title         "#+TITLE:"
     :subtitle      "#+subtitle:"
+    :subtitle      "#+SUBTITLE:"
     :author        "#+author:"
+    :author        "#+AUTHOR:"
     :date          "#+date:"
+    :date          "#+DATE:"
     :property      "#+property:"
+    :property      "#+PROPERTY:"
     :options       "#+options:"
     :latex_class   "#+latex_class:"
     :latex_header  "#+latex_header:"
     :beamer_header "#+beamer_header:"
     :attr_latex    "#+attr_latex:"
-    :attr_html     "#+attr_latex:"
+    :attr_html     "#+attr_html:"
+    :attr_html     "#+html:"
     :begin_quote   "#+begin_quote"
     :end_quote     "#+end_quote"
     :caption       "#+caption:"
@@ -154,7 +162,8 @@
     :begin_export  "#+begin_export"
     :end_export    "#+end_export"
     :results       "#+RESULTS:"
-    :property      ":PROPERTIES:"
+    :properties    ":properties:"
+    :properties    ":PROPERTIES:"
     :end           ":END:"
     :priority_a    "[#A]"
     :priority_b    "[#B]"
@@ -728,6 +737,7 @@ can grow up to be fully-fledged org-mode buffers."
 
 (defun +org-init-keybinds-h ()
   "Sets up org-mode keybindings. Tries to fix the idiosyncrasies between the two."
+  (add-hook 'radian-escape-hook #'+org-remove-occur-highlights-h)
 
   ;; C-a & C-e act like `radian/backward-to-bol-or-indent' and
   ;; `radian/forward-to-last-non-comment-or-eol', but with more org awareness.
@@ -743,7 +753,55 @@ can grow up to be fully-fledged org-mode buffers."
              #'+org-indent-maybe-h)
 
   (add-hook 'radian-delete-backward-functions
-            #'+org-delete-backward-char-and-realign-table-maybe-h))
+            #'+org-delete-backward-char-and-realign-table-maybe-h)
+
+  (-keys ((org-mode-map
+           ;; Recently, a [tab] keybind in `outline-mode-cycle-map' has begun
+           ;; overriding org's [tab] keybind in GUI Emacs. This is needed to undo
+           ;; that, and should probably be PRed to org.
+           ([tab]        . org-cycle)
+           ("C-c C-S-l"  . +org/remove-link)
+           ("C-c C-i"    . org-toggle-inline-images)
+           ;; textmate-esque newline insertion
+           ("S-RET"      . +org/shift-return)
+           ([S-return]   . +org/shift-return)
+           ("C-M-RET"    . +org/insert-item-below)
+           ("C-S-RET"    . +org/insert-item-above)
+           ([C-M-return] . +org/insert-item-below)
+           ([C-S-return] . +org/insert-item-above)
+           ;; more intuitive RET keybinds
+           ([return]     . (cmds! (meow-normal-mode-p) #'+org/dwim-at-point
+                                  (cmd! (org-return electric-indent-mode))))
+           ("RET"        . (cmds! (meow-normal-mode-p) #'+org/dwim-at-point
+                                  (cmd! (org-return electric-indent-mode))))
+           ;; ("G"          . (cmd! (org-clock-goto 'select)))
+           ;; ("l"          . +org/toggle-last-clock)
+
+           ;; ;; sensible vim-esque folding keybinds
+           ;; ("za"  . +org/toggle-fold)
+           ;; ("zA"  . org-shifttab)
+           ;; ("zc" . +org/close-fold)
+           ;; ("zC"  . outline-hide-subtree)
+           ;; ("zm"  . +org/hide-next-fold-level)
+           ;; ("zM"  . +org/close-all-folds)
+           ;; ("zn"  . org-tree-to-indirect-buffer)
+           ;; ("zo" . +org/open-fold)
+           ;; ("zO"  . outline-show-subtree)
+           ;; ("zr"  . +org/show-next-fold-level)
+           ;; ("zR" . +org/open-all-folds)
+           ;; Org-aware C-a/C-e
+           ("C-a"        . org-beginning-of-line)
+           ("C-e"        . org-end-of-line))
+
+          (org-read-date-minibuffer-local-map
+           ("C-<left>"    . (cmd! (org-eval-in-calendar '(calendar-backward-day 1))))
+           ("C-<right>"   . (cmd! (org-eval-in-calendar '(calendar-forward-day 1))))
+           ("C-<up>"      . (cmd! (org-eval-in-calendar '(calendar-backward-week 1))))
+           ("C-<down>"    . (cmd! (org-eval-in-calendar '(calendar-forward-week 1))))
+           ("C-S-<right>" . (cmd! (org-eval-in-calendar '(calendar-backward-month 1))))
+           ("C-S-<left>"  . (cmd! (org-eval-in-calendar '(calendar-forward-month 1))))
+           ("C-S-<up>"    . (cmd! (org-eval-in-calendar '(calendar-backward-year 1))))
+           ("C-S-<down>"  . (cmd! (org-eval-in-calendar '(calendar-forward-year 1))))))))
 
 (defun +org-init-popup-rules-h ()
   (set-popup-rules!

@@ -40,7 +40,7 @@
   "Options of nano theme."
   :group 'faces)
 
-(defcustom nano-theme-header-scales '(1.3 1.2 1.1 1.0 1.0 1.0 1.0)
+(defcustom nano-theme-header-scales '(1.3 0.95 0.85 0.75 0.7 0.7 0.7)
   "Scales for headers."
   :group 'nano-theme)
 
@@ -115,7 +115,7 @@
       (critical                      (--l?d "#FF6F00" "#EBCB8B"))
       (salient                       (--l?d "#673AB7" "#81A1C1"))
       (strong                        (--l?d "#000000" "#ECEFF4"))
-      (popout                        (--l?d "#FFAB91" "#D08770"))
+      (popout                        (--l?d "#FF7FA2" "#D06A70"))
       (subtle                        (--l?d "#ECEFF1" "#434C5E"))
       (faded                         (--l?d "#B0BEC5" "#677691"))
       (fg-alt                        (--l?d "#505050" "#a8a8a8"))
@@ -411,14 +411,17 @@
    `(bookmark-menu-bookmark ((,class (:foreground ,salient))))
 
    ;; Outline
-   `(outline-1 ((,class (:foreground ,foreground :bold t))))
-   `(outline-2 ((,class (:foreground ,foreground :bold t))))
-   `(outline-3 ((,class (:foreground ,foreground :bold t))))
-   `(outline-4 ((,class (:foreground ,foreground :bold t))))
-   `(outline-5 ((,class (:foreground ,foreground :bold t))))
-   `(outline-6 ((,class (:foreground ,foreground :bold t))))
-   `(outline-7 ((,class (:foreground ,foreground :bold t))))
-   `(outline-8 ((,class (:foreground ,foreground :bold t))))
+   `(outline-1 ((,class (:foreground ,foreground :background ,magenta-nuanced-bg :bold t))))
+   `(outline-2 ((,class (:foreground ,fg-special-warm :background ,red-nuanced-bg :bold t))))
+   `(outline-3 ((,class (:foreground ,fg-special-cold :background ,blue-nuanced-bg :bold t))))
+   `(outline-4 ((,class (:foreground ,fg-special-mild :background ,cyan-nuanced-bg :bold t))))
+   `(outline-5 ((,class (:foreground ,fg-special-calm :background ,green-nuanced-bg :bold t))))
+   `(outline-6 ((,class (:foreground ,yellow-nuanced-fg :background ,yellow-nuanced-bg :bold t))))
+   `(outline-7 ((,class (:foreground ,red-nuanced-fg :background ,red-nuanced-bg :bold t))))
+   `(outline-8 ((,class (:foreground ,magenta-nuanced-fg :background ,bg-alt :bold t))))
+
+   ;; outline-minor-faces
+   `(outline-minor-0 (()))
 
    ;; Message
    `(message-cited-text        ((,class (:foreground ,faded))))

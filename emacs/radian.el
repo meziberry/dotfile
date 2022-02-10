@@ -190,9 +190,9 @@ in daemon sessions (they are loaded immediately at startup).")
   "Theme sequence of changing. `(THEME-NAME . IS-DARK-THEME)'")
 
 ;;; Radian-require
-(defmacro req! (name)
+(defmacro req! (name &optional path)
   "Load Radian sub configuration file (in *lisp/*). NAME is filename."
-  (let ((file (-lisp/ (symbol-name name) ".el")))
+  (let ((file (concat (or path *radian-lisp/*) (symbol-name name) ".el")))
     (if byte-compile-current-file
         (let ((forms nil))
           (with-temp-buffer
@@ -218,26 +218,19 @@ in daemon sessions (they are loaded immediately at startup).")
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages
-  '(haskell-mode)
-  "List of packages that Radian should not load. Radian always loads the
-packages in `radian-core-packages' even if they are members of this list.
+  '(haskell-mode hl-line ligature)
+  "List of packages that Radian should not load.
 If the list starts with `:not', packages that are not part of this
 list are not loaded instead. This variable should be modified in
 `radian-before-straight-hook' to be effective.")
-
-(defvar radian-core-packages
-  '(leaf straight no-littering restart-emacs gcmh blackout
-     leaf-keywords el-patch apheleia)
-  "List of Radian core packages")
 
 (defun featurep! (package)
   "Return nil if PACKAGE should not be loaded by Radian."
   (declare (indent defun))
   (if (symbolp package)
-      (or (memq package radian-core-packages)
-          (if (eq (car radian-disabled-packages) :not)
-              (memq package radian-disabled-packages)
-            (not (memq package radian-disabled-packages))))
+      (if (eq (car radian-disabled-packages) :not)
+          (memq package radian-disabled-packages)
+        (not (memq package radian-disabled-packages)))
     (let ((p (car package)))
       (cond ((eq p :or) (cl-some #'featurep! (cdr package)))
             ((eq p :and) (cl-every #'featurep! (cdr package)))
@@ -1663,8 +1656,8 @@ convert\" UTF8_STRING)'. Disable that."
     (when other-buffer
       (set-window-buffer (next-window) other-buffer))))
 
-(-keys ("C-x |" . split-window-horizontally-instead)
-       ("C-x _" . split-window-vertically-instead))
+(-keys (("C-x |" . split-window-horizontally-instead)
+        ("C-x _" . split-window-vertically-instead)))
 
 (defun radian/split-window()
   "Split the window to see the most recent buffer in the other window.
@@ -1815,6 +1808,7 @@ Return nil when horizontal scrolling has moved it off screen."
     (and (>= (- (current-column) (window-hscroll)) 0)
          (< (- (current-column) (window-hscroll))
             (window-width))))
+
   (defun swsw--remove-id-overlay ()
     "Remove leading char overlays."
     (mapc #'delete-overlay swsw--overlays)
@@ -1833,6 +1827,7 @@ Return nil when horizontal scrolling has moved it off screen."
                 (set-window-hscroll wnd hscroll)))
             swsw--windows-hscroll))
     (setq swsw--windows-hscroll nil))
+
   (defun swsw--display-id-overlay ()
     "Create an overlay on every window."
     ;; Properly adds overlay in visible region of most windows except for any one
@@ -1889,12 +1884,6 @@ Return nil when horizontal scrolling has moved it off screen."
   (add-hook 'swsw-before-command-hook #'swsw--display-id-overlay)
   (add-hook 'swsw-after-command-hook #'swsw--remove-id-overlay)
 
-  ;; (if swsw-mode
-  ;;     (progn
-  ;;       (add-hook 'radian-switch-frame-hook #'swsw--update-frame)
-  ;;       (add-hook 'radian-switch-window-hook #'swsw--update))
-  ;;   (remove-hook 'radian-switch-frame-hook #'swsw--update-frame)
-  ;;   (remove-hook 'radian-switch-window-hook #'swsw--update))
   (defadvice! swsw-format-id-a (id)
     "Format an ID string for WINDOW."
     :filter-return #'swsw-format-id
@@ -2071,17 +2060,17 @@ orderless."
     ([remap switch-to-buffer-other-window]. consult-buffer-other-window)
     ([remap switch-to-buffer-other-frame] . consult-buffer-other-frame)
     ([remap yank-pop]                     . consult-yank-pop)
-    ([remap persp-switch-to-buffer]       . +vertico/switch-workspace-buffer)))
+    ([remap persp-switch-to-buffer]       . +vertico/switch-workspace-buffer)
+    (radian-comma-keymap
+     ("g"  . project-or-external-find-regexp)
+     ("/"  . +vertico/project-search)
+     ("fr" . consult-recent-file)
+     ("ff" . +vertico/consult-fd))))
 
   (advice-add #'completing-read-multiple :override #'consult-completing-read-multiple)
   (advice-add #'multi-occur :override #'consult-multi-occur)
 
   :defer-config
-  (-keys (radian-comma-keymap
-          ("g"  . project-or-external-find-regexp)
-          ("/"  . +vertico/project-search)
-          ("fr" . consult-recent-file)
-          ("ff" . +vertico/consult-fd)))
 
   (defadvice! +vertico--consult-recent-file-a (&rest _args)
     "`consult-recent-file' needs to have `recentf-mode' on to work correctly"
@@ -2176,7 +2165,6 @@ completing-read prompter."
   :config
   (pushnew! marginalia-command-categories
             '(flycheck-error-list-set-filter . builtin)
-            '(persp-switch-to-buffer . buffer)
             '(project-find-file . project-file)
             '(project-switch-to-buffer . buffer)
             '(project-switch-project . project-file)))
@@ -2701,8 +2689,8 @@ invocation will kill the newline."
 
 ;; Feature `fileloop' provides the underlying machinery used to do
 ;; operations on multiple files, such as find-and-replace.
-(eval-when! (version<= "27" emacs-version)
-  (-ow! fileloop
+(-ow! fileloop
+    :when (version<= "27" emacs-version)
     :config
 
     (defadvice! radian--advice-fileloop-find-all-matches
@@ -2716,7 +2704,7 @@ buffer."
       (letf! ((defun perform-replace (&rest args)
                 (apply perform-replace
                        (append args (list (point-min) (point-max))))))
-        (apply func args)))))
+        (apply func args))))
 
 ;; Package `visual-regexp' provides an alternate version of
 ;; `query-replace' which highlights matches and replacements as you
@@ -2888,6 +2876,7 @@ and cannot run in."
 
 ;;;; ligature
 (-ow! ligature
+  :unless IS-WINDOWS          ; `ligature' make emacs slow on windows.
   :straight (ligature :host github :repo "mickeynp/ligature.el")
 
   :config
@@ -4911,91 +4900,27 @@ messages."
 
 ;;; Applications
 ;;;; Email
-(pow! wanderlust
-  :config
-  (setq mail-user-agent 'wl-user-agent
-        pgg-scheme 'gpg
-        mime-edit-split-message nil)
 
-  (when (fboundp 'define-mail-user-agent)
-    (define-mail-user-agent
-      'wl-user-agent
-      'wl-user-agent-compose
-      'wl-draft-send
-      'wl-draft-kill
-      'mail-send-hook))
-
-  (setq wl-demo nil wl-stay-folder-window t)
-
-  (setq wl-message-truncate-lines t
-        wl-summary-width 120
-        wl-message-ignored-field-list
-        '(".*Received:"
-          ".*Path:"
-          ".*Id:"
-          "^References:"
-          "^Replied:"
-          "^Errors-To:"
-          "^Lines:"
-          "^Sender:"
-          ".*Host:"
-          "^Xref:"
-          "^Content-Type:"
-          "^Precedence:"
-          "^Status:"
-          "^X.*:"
-          "^MIME.*:"
-          "^In-Reply-To:"
-          "^Content-Transfer-Encoding:"
-          "^List-.*:")
-        wl-message-visible-field-list
-        '("^Message-Id:"
-          "^User-Agent:"
-          "^X-Mailer:"
-          "^X-Face:"))
-
-  (when (featurep! '+gmail)
-    (setq elmo-imap4-default-server "imap.gmail.com"
-          elmo-imap4-default-port 993
-          elmo-imap4-default-authenticate-type 'clear ; CRAM-MD5
-          elmo-imap4-default-user user-mail-address
-          elmo-imap4-default-stream-type 'ssl
-          elmo-imap4-set-seen-flag-explicitly t)
-
-    (setq wl-smtp-connection-type 'starttls
-          wl-smtp-posting-port 587
-          wl-smtp-authenticate-type "plain"
-          wl-smtp-posting-user user-mail-address
-          wl-smtp-posting-server "smtp.gmail.com"
-          wl-local-domain "gmail.com")
-
-    (setq wl-default-folder "%inbox"
-          wl-draft-folder "%[Gmail]/Drafts"
-          wl-trash-folder "%[Gmail]/Trash"
-          wl-fcc-force-as-read t
-          wl-default-spec "%"))
-
-  (setq wl-message-id-domain wl-local-domain)
-
-  (add-hook 'mime-edit-mode-hook #'auto-fill-mode))
 
 ;;;; Organization
 ;; Use `-ow!' here because we already installed Org earlier.
 (-ow! org
   :preface
-  (pow! ox-pandoc)
-  (pow! org-appear)
-  (pow! org-superstar)
-  (req! conf-org)
+  (pow ox-pandoc)
+  (pow htmlize)
+  (pow orgit)
+  (pow orgit-forge)
+  (pow ox-clip)
+  (sup 'org-appear)
+  (sup 'org-superstar)
+  (sup 'toc-org)
+  (req! -org)
   :chord (",c" . org-capture)
   :increment
   calendar find-func format-spec org-macs org-compat org-faces
   org-entities org-list org-pcomplete org-src org-footnote
   org-macro ob org org-agenda org-capture
-  :bind (org-mode-map
-         ;; See discussion of this function below.
-         ("C-M-RET" . radian-org-insert-heading-at-point)
-         ("C-M-<return>" . radian-org-insert-heading-at-point))
+
   :init
   (setq org-use-property-inheritance t   ; it's convenient to have properties inherited
         org-log-done 'time               ; having the time a item is done sounds convininet
@@ -5010,7 +4935,9 @@ messages."
     :config
     (setq org-appear-autoemphasis t
           org-appear-autosubmarkers t
-          org-appear-autolinks nil)
+          org-appear-autoentities t
+          org-appear-autolinks t
+          org-appear-delay 0.1)
     ;; for proper first-time setup, `org-appear--set-elements'
     ;; needs to be run after other hooks have acted.
     (run-at-time nil nil #'org-appear--set-elements))
@@ -5026,6 +4953,21 @@ messages."
             ("DONE" . 9745) ("[X]"  . 9745))
           org-superstar-headline-bullets-list '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
           org-superstar-prettify-item-bullets t ))
+
+  (-ow! toc-org ; auto-table of contents
+    :hook (org-mode-hook . toc-org-enable)
+    :config
+    (setq toc-org-hrefify-default "gh")
+
+    (defadvice! +org-inhibit-scrolling-a (fn &rest args)
+      "Prevent the jarring scrolling that occurs when the-ToC is regenerated."
+      :around #'toc-org-insert-toc
+      (let ((p (set-marker (make-marker) (point)))
+            (s (window-start)))
+        (prog1 (apply fn args)
+          (goto-char p)
+          (set-window-start nil s t)
+          (set-marker p nil)))))
 
   ;; HACK `org-id' doesn't check if `org-id-locations-file' exists or is
   ;;      writeable before trying to read/write to it.
@@ -5046,103 +4988,107 @@ messages."
         (`at-point (add-hook 'post-command-hook #'+org-play-gif-at-point-h nil t))
         (`t (add-hook 'post-command-hook #'+org-play-all-gifs-h nil t)))))
 
-  ;; But add a new function for recovering the old behavior (see
-  ;; `:bind' above).
-  (defun radian-org-insert-heading-at-point ()
-    "Insert heading without respecting content.
-This runs `org-insert-heading' with
-`org-insert-heading-respect-content' bound to nil."
-    (interactive)
-    (let ((org-insert-heading-respect-content nil))
-      (org-insert-heading)))
-
   (put 'org-tags-exclude-from-inheritance 'safe-local-variable
-       #'radian--list-of-strings-p))
+       #'radian--list-of-strings-p)
 
-;; Feature `org-indent' provides an alternative view for Org files in
-;; which sub-headings are indented.
-(-ow! org-indent
+  ;; Feature `org-indent' provides an alternative view for Org files in
+  ;; which sub-headings are indented.
+  (-ow! org-indent
 
-  :init
+    :init
 
-  (add-hook 'org-mode-hook #'org-indent-mode))
-;; Feature `org-agenda' from package `org' provides the agenda view
-;; functionality, which allows for collating TODO items from your Org
-;; files into a single buffer.
-(-ow! org-agenda
+    (add-hook 'org-mode-hook #'org-indent-mode))
+  ;; Feature `org-agenda' from package `org' provides the agenda view
+  ;; functionality, which allows for collating TODO items from your Org
+  ;; files into a single buffer.
+  (-ow! org-agenda
 
-  :config
+    :config
 
-  (defadvice! radian--advice-org-agenda-default-directory
-    (org-agenda &rest args)
-    "If `org-directory' exists, set `default-directory' to it in the agenda.
+    (defadvice! radian--advice-org-agenda-default-directory
+      (org-agenda &rest args)
+      "If `org-directory' exists, set `default-directory' to it in the agenda.
 This makes the behavior of `find-file' more reasonable."
-    :around #'org-agenda
-    (let ((default-directory (if (file-exists-p org-directory)
-                                 org-directory
-                               default-directory)))
-      (apply org-agenda args)))
+      :around #'org-agenda
+      (let ((default-directory (if (file-exists-p org-directory)
+                                   org-directory
+                                 default-directory)))
+        (apply org-agenda args)))
 
-  (defadvice! radian--advice-blackout-org-agenda
-    (&rest _)
-    "Override the `org-agenda' mode lighter to just \"Org-Agenda\"."
-    "Org-Agenda"
-    :override #'org-agenda-set-mode-name)
+    (defadvice! radian--advice-blackout-org-agenda
+      (&rest _)
+      "Override the `org-agenda' mode lighter to just \"Org-Agenda\"."
+      "Org-Agenda"
+      :override #'org-agenda-set-mode-name)
 
-  (add-hook! 'org-agenda-mode-hook
-    (defun radian--org-agenda-setup ()
-      "Disable `visual-line-mode' locally."
-      ;; See https://superuser.com/a/531670/326239.
-      (visual-line-mode -1)
-      (let ((inhibit-message t)
-            (message-log-max nil))
-        ;; I'm not exactly sure why this is necessary. More research is
-        ;; needed.
-        (toggle-truncate-lines +1))))
+    (add-hook! 'org-agenda-mode-hook
+      (defun radian--org-agenda-setup ()
+        "Disable `visual-line-mode' locally."
+        ;; See https://superuser.com/a/531670/326239.
+        (visual-line-mode -1)
+        (let ((inhibit-message t)
+              (message-log-max nil))
+          ;; I'm not exactly sure why this is necessary. More research is
+          ;; needed.
+          (toggle-truncate-lines +1))))
 
-  ;; Hide blocked tasks in the agenda view.
-  (setq org-agenda-dim-blocked-tasks 'invisible))
-;; Feature `org-clock' from package `org' provides the task clocking
-;; functionality.
-(-ow! org-clock
-  ;; We have to autoload these functions in order for the below code
-  ;; that enables clock persistence without slowing down startup to
-  ;; work.
-  :commands (org-clock-load org-clock-save)
-  :init
+    ;; Hide blocked tasks in the agenda view.
+    (setq org-agenda-dim-blocked-tasks 'invisible))
 
-  ;; Allow clock data to be saved persistently.
-  (setq org-clock-persist t)
+  (-ow! org-crypt ; built-in
+    :commands org-encrypt-entries org-encrypt-entry org-decrypt-entries org-decrypt-entry
+    :hook (org-reveal-start-hook . org-decrypt-entry)
+    :preface
+    ;; org-crypt falls back to CRYPTKEY property then `epa-file-encrypt-to', which
+    ;; is a better default than the empty string `org-crypt-key' defaults to.
+    (defvar org-crypt-key nil)
+    (after! org
+      (add-to-list 'org-tags-exclude-from-inheritance "crypt")
+      (add-hook! 'org-mode-hook
+        (add-hook 'before-save-hook 'org-encrypt-entries nil t))))
 
-  ;; Actually enable clock persistence. This is taken from
-  ;; `org-clock-persistence-insinuate', but we can't use that function
-  ;; since it causes both `org' and `org-clock' to be loaded for no
-  ;; good reason.
-  (add-hook 'org-mode-hook 'org-clock-load)
-  (add-hook! 'kill-emacs-hook
-    (defun radian--org-clock-save ()
-      "Run `org-clock-save', but only if Org has been loaded.
+  ;; Feature `org-clock' from package `org' provides the task clocking
+  ;; functionality.
+  (-ow! org-clock
+    ;; We have to autoload these functions in order for the below code
+    ;; that enables clock persistence without slowing down startup to
+    ;; work.
+    :commands (org-clock-load org-clock-save)
+    :init
+
+    ;; Allow clock data to be saved persistently.
+    (setq org-clock-persist t)
+
+    ;; Actually enable clock persistence. This is taken from
+    ;; `org-clock-persistence-insinuate', but we can't use that function
+    ;; since it causes both `org' and `org-clock' to be loaded for no
+    ;; good reason.
+    (add-hook 'org-mode-hook 'org-clock-load)
+    (add-hook! 'kill-emacs-hook
+      (defun radian--org-clock-save ()
+        "Run `org-clock-save', but only if Org has been loaded.
 Using this on `kill-emacs-hook' instead of `org-clock-save'
 prevents a delay on killing Emacs when Org was not yet loaded."
-      (when (featurep 'org)
-        (org-clock-save))))
+        (when (featurep 'org)
+          (org-clock-save))))
 
-  (defun radian--advice-org-clock-load-automatically (&rest _)
-    "Run `org-clock-load'.
+    (defun radian--advice-org-clock-load-automatically (&rest _)
+      "Run `org-clock-load'.
 This is a `:before' advice for various Org functions which might
 be invoked before `org-mode-hook' is run."
-    (org-clock-load))
+      (org-clock-load))
 
-  :config
+    :config
 
-  (advice-add #'org-clock-load :around #'fn-quiet!)
+    (advice-add #'org-clock-load :around #'fn-quiet!)
 
-  (dolist (fun '(org-clock-in
-                 org-clock-out
-                 org-clock-in-last
-                 org-clock-goto
-                 org-clock-cancel))
-    (advice-add fun :before #'radian--advice-org-clock-load-automatically)))
+    (dolist (fun '(org-clock-in
+                   org-clock-out
+                   org-clock-in-last
+                   org-clock-goto
+                   org-clock-cancel))
+      (advice-add fun :before #'radian--advice-org-clock-load-automatically))))
+
 
 ;;;; Roam
 
@@ -6057,6 +6003,7 @@ No tab will created if the command is cancelled."
                 ;;(top . 50)
                 ;;(undecorated . t)
                 (internal-border-width . 0)
+                (alpha-background . 80)
                 (alpha . (95 . 80))))
 (appendq! default-frame-alist initial-frame-alist)
 
@@ -6186,7 +6133,7 @@ turn it off again after creating the first frame."
 (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
 
 ;;;; Fonts
-(req! conf-font)
+(req! -font)
 
 ;;;; Mode line
 (-ow! recursion-indicator
@@ -6659,7 +6606,7 @@ the unwritable tidbits."
   :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
   :custom
   (nano-theme-padded-modeline . nil)
-  (nano-theme-header-scales . '(1.15 1.12 1.1 1.0 1.0 1.0 1.0))
+  (nano-theme-header-scales . '(1.3 0.95 0.85 0.75 0.7 0.7 0.7))
   :config
   (eval-when! (boundp 'ns-system-appearance)
     (add-to-list
@@ -6755,8 +6702,7 @@ the unwritable tidbits."
   ;; We should only get here if init was successful. If we do,
   ;; byte-compile this file asynchronously in a subprocess using the
   ;; Radian Makefile. That way, the next startup will be fast(er).
-  ;; (run-with-idle-timer 1 nil #'radian-byte-compile)
-  )
+  (run-with-idle-timer 1 nil #'radian-byte-compile))
 
 ;;; Bootstrap interactive session
 

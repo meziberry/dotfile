@@ -1,5 +1,5 @@
-#+TITLE:   ui/popup
-#+DATE:    January 6, 2018
+#+title:   ui/popup
+#+date:   January 6, 2018
 #+SINCE:   v2.0.9
 #+STARTUP: inlineimages
 
@@ -31,10 +31,8 @@ should clean up after itself and kill off buffers I mark as transient.
 + =+all= Enables fallback rules to ensure all temporary/special buffers (whose
   name begins with a space or asterix) are treated as popups.
 + =+defaults= Enables reasonable default popup rules for a variety of buffers.
-
 * Prerequisites
 This module has no external prerequisites.
-
 * Configuration
 ** ~set-popup-rule!~ and ~set-popup-rules!~
 This module has two functions for defining your own rules for popups:
