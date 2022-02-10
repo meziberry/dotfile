@@ -18,6 +18,7 @@
 
 ;;; Comp
 (defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
+;; (if (fboundp 'startup-redirect-eln-cache) (startup-redirect-eln-cache "cache/eln"))
 
 (and
  IS-NATIVECOMP
@@ -758,6 +759,7 @@ If PKG passed, require PKG before binding."
 
   :hook (after-init-hook . meow-global-mode)
   :config
+  (cl-pushnew '(help-mode . motion) meow-mode-state-list)
   (after! consult
     (defun +consult--line-a (&rest args)
       "after `consult--line' copy the car of `consult--line-history'
@@ -1934,8 +1936,7 @@ Return nil when horizontal scrolling has moved it off screen."
   (setq ibuffer-saved-filter-groups nil)
   (setq ibuffer-old-time 48))
 
-;;;; ------------------------Head core ends here-----------------------------
-
+;;;; HEAD-CORE 
 
 ;;; MODULE {Vertico}
 
@@ -2119,6 +2120,7 @@ orderless."
   (-keys (consult-crm-map
           ([tab]     . +vertico/crm-select)
           ([backtab] . +vertico/crm-select-keep-input)
+          ([return]  . +vertico/crm-exit)
           ("RET"     . +vertico/crm-exit))))
 
 ;;;; Embark
@@ -4570,6 +4572,17 @@ unhelpful."
             (#'describe-variable #'helpful-variable))
       (apply fn args)))
 
+  ;; Note that this function is actually defined in `elisp-mode'
+  ;; because screw modularity.
+  (defadvice! radian--advice-company-elisp-use-helpful
+    (func &rest args)
+    "Cause `company' to use Helpful to show Elisp documentation."
+    :around #'elisp--company-doc-buffer
+    (cl-letf (((symbol-function #'describe-function) #'helpful-function)
+              ((symbol-function #'describe-variable) #'helpful-variable)
+              ((symbol-function #'help-buffer) #'current-buffer))
+      (apply func args)))
+
   (after! apropos
     ;; patch apropos buttons to call helpful instead of help
     (dolist (fun-bt '(apropos-function apropos-macro apropos-command))
@@ -4655,17 +4668,6 @@ bizarre reason."
   ;; <https://github.com/magnars/dash.el#fontification-of-special-variables>
   ;; Integrate dash.el
   (eval-after-load 'dash '(global-dash-fontify-mode))
-
-  ;; Note that this function is actually defined in `elisp-mode'
-  ;; because screw modularity.
-  (defadvice! radian--advice-company-elisp-use-helpful
-    (func &rest args)
-    "Cause `company' to use Helpful to show Elisp documentation."
-    :around #'elisp--company-doc-buffer
-    (cl-letf (((symbol-function #'describe-function) #'helpful-function)
-              ((symbol-function #'describe-variable) #'helpful-variable)
-              ((symbol-function #'help-buffer) #'current-buffer))
-      (apply func args)))
 
   (defadvice! radian--advice-fill-elisp-docstrings-correctly (&rest _)
     "Prevent `auto-fill-mode' from adding indentation to Elisp docstrings."
@@ -4768,18 +4770,22 @@ SYMBOL is as in `xref-find-definitions'."
 ;; some reason; note that `xref-find-definitions' is not a replacement
 ;; because it is major-mode dependent.) By further analogy, we should
 ;; bind `find-library'.
-(-keys (("C-h C-f" . find-function)
-        ("C-h C-v" . find-variable)
-        ("C-h C-o" . radian-find-symbol)
-        ("C-h C-l" . find-library)))
+(-keys (("C-h f"   . find-function)
+        ("C-h v"   . find-variable)
+        ("C-h o"   . radian-find-symbol)
+        ("C-h C-l" . find-library)
+        ("C-h C-f" . describe-function)
+        ("C-h C-v" . describe-variable)
+        ("C-h C-o" . describe-symbol)
+        ("C-h C-e" . view-echo-area-messages)))
 
+;;;;; Locate emacs src directory
 ;; Let's establish a standard location for the Emacs source code.
 (setq source-directory (expand-file-name "src" user-emacs-directory))
 
 ;; This is initialized to nil by `find-func' if the source is not
 ;; cloned when the library is loaded.
-(setq find-function-C-source-directory
-      (expand-file-name "src" source-directory))
+(setq find-function-C-source-directory (expand-file-name "src" source-directory))
 
 (defun radian-clone-emacs-source-maybe ()
   "Prompt user to clone Emacs source repository if needed."
@@ -4879,7 +4885,7 @@ messages."
 ;;;;; Emacs Lisp linting
 ;; Feature `checkdoc' provides some tools for validating Elisp
 ;; docstrings against common conventions.
-(-ow! checkdoc
+(-ow checkdoc
   :init
   ;; Not sure why this isn't included by default.
   (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
@@ -4888,7 +4894,6 @@ messages."
 ;; for Elisp code. We use `with-eval-after-load' because `leaf'
 ;; is configured to try to `require' features during byte-compilation.
 (with-eval-after-load 'elisp-lint
-  :init
   ;; From the package. We need this because some packages set this as
   ;; a file-local variable, but we don't install the package so Emacs
   ;; doesn't know the variable is safe.
@@ -5888,8 +5893,8 @@ No tab will created if the command is cancelled."
 (pow! link-hint
   :bind ("C-c C-o" . link-hint-open-link)
   :init
-  (eval-after-load 'help '(define-key help-mode-map "o" #'link-hint-open-link))
-  (eval-after-load 'helpful '(define-key helpful-mode-map "o" #'link-hint-open-link))
+  (eval-after-load 'help-mode '(define-key help-mode-map "o" #'link-hint-open-link))
+  (after! helpful (define-key helpful-mode-map "o" #'link-hint-open-link))
   (eval-after-load 'apropos '(define-key apropos-mode-map "o" #'link-hint-open-link))
   (eval-after-load 'info '(define-key Info-mode-map "o" #'link-hint-open-link)))
 
@@ -5990,8 +5995,7 @@ No tab will created if the command is cancelled."
     (advice-add #'rainbow-turn-off :after #'my-rainbow-clear-overlays))
   :blackout t)
 
-
-;;;; --------------------------Tail core start here---------------------------
+;;;; TAIL-CORE 
 
 ;;;; Appearance
 (appendq! initial-frame-alist

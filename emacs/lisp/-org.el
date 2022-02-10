@@ -149,14 +149,13 @@
     :property      "#+property:"
     :property      "#+PROPERTY:"
     :options       "#+options:"
+    :options       "#+OPTIONS:"
     :latex_class   "#+latex_class:"
     :latex_header  "#+latex_header:"
     :beamer_header "#+beamer_header:"
     :attr_latex    "#+attr_latex:"
     :attr_html     "#+attr_html:"
     :attr_html     "#+html:"
-    :begin_quote   "#+begin_quote"
-    :end_quote     "#+end_quote"
     :caption       "#+caption:"
     :header        "#+header:"
     :begin_export  "#+begin_export"
@@ -165,6 +164,7 @@
     :properties    ":properties:"
     :properties    ":PROPERTIES:"
     :end           ":END:"
+    :end           ":end:"
     :priority_a    "[#A]"
     :priority_b    "[#B]"
     :priority_c    "[#C]"
@@ -629,7 +629,7 @@ mutating hooks on exported output, like formatters."
   (add-to-list 'org-file-apps '(remote . emacs))
 
   ;; Open help:* links with helpful-* instead of describe-*
-  (advice-add #'org-link--open-help :around #'radian-use-helpful-a)
+  (after! helpful (advice-add #'org-link--open-help :around #'radian-use-helpful-a))
 
   (defadvice! +org--show-parents-a (&optional arg)
     "Show all headlines in the buffer, like a table of contents.
