@@ -18,6 +18,8 @@
 
 ;;; Comp
 (defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
+
+;; ;; Custom eln directory
 ;; (if (fboundp 'startup-redirect-eln-cache) (startup-redirect-eln-cache "cache/eln"))
 
 (and
@@ -54,7 +56,7 @@ setting the DEBUG envvar will enable this at startup.")
   "If non-nil, Emacs is in interactive mode.")
 
 (defvar radian-init-time nil
-  "The time it took, in seconds, for Doom Emacs to initialize.")
+  "The time it took, in seconds, for Radian Emacs to initialize.")
 
 ;; Directories/files
 (defconst *radian-directory* (file-name-directory
@@ -187,8 +189,8 @@ in daemon sessions (they are loaded immediately at startup).")
   :group 'radian-hooks
   :type 'hook)
 
-(defvar radian-theme-list '((modus-vivendi . t) (modus-operandi . nil))
-  "Theme sequence of changing. `(THEME-NAME . IS-DARK-THEME)'")
+(defvar radian-theme-list '((modus-operandi . t) (modus-vivendi . nil))
+  "Theme sequence of changing. `(THEME-NAME . IS-LIGHT-THEME)'")
 
 ;;; Radian-require
 (defmacro req! (name &optional path)
@@ -1439,6 +1441,25 @@ all hooks after it are ignored.")
 
 ;;; MODULE {Environment}
 
+;;;; tty support
+;; Keep window title up-to-date. Should fail gracefully in non-xterm terminals.
+;; Only works in Emacs 27+.
+(setq xterm-set-window-title t)
+
+;; Some terminals offer two different cursors: a "visible" static cursor and a
+;; "very visible" blinking one. By default, Emacs uses the very visible cursor
+;; and will switch back to it when Emacs is started or resumed. A nil
+;; `visible-cursor' prevents this.
+(setq visible-cursor nil)
+
+;; Enable the mouse in terminal Emacs
+(add-hook 'tty-setup-hook #'xterm-mouse-mode)
+
+;; Windows terminals don't support what I'm about to do, but best not to wrap
+;; this in a IS-WINDOWS check, in case you're using WSL or Cygwin, which do and
+;; *might* support it.
+(pow! clipetty :hook (tty-setup-hook . global-clipetty-mode) :blackout t)
+
 ;;;; Environment variables
 
 ;; Unix tools look for HOME, but this is normally not defined on Windows.
@@ -1712,6 +1733,7 @@ active minibuffer, even if the minibuffer is not selected."
         (kill-buffer-and-window))
     (funcall func buffer-or-name)))
 
+;;;;; popup system
 (-ow! popup
   :straight
   `(popup :local-repo ,(-contrib/ "popup/") :type nil
@@ -2099,7 +2121,7 @@ orderless."
    ;; +default/search-project +default/search-other-project
    ;; +default/search-cwd +default/search-other-cwd
    ;; +default/search-notes-for-symbol-at-point
-   ;; consult--source-file consult--source-project-file consult--source-bookmark
+   consult--source-recent-file consult--source-project-recent-file consult--source-bookmark
    :preview-key (kbd "C-SPC"))
 
   (consult-customize
@@ -3739,7 +3761,7 @@ was printed, and only have ElDoc display if one wasn't."
   ;; With `lsp-ui', there's no need for the ElDoc integration
   ;; provided by `lsp-mode', and in fact for Bash it is very
   ;; annoying since all the hover information is multiline.
-  (eval-after-load 'lsp-mode '(setq lsp-eldoc-enable-hover nil)))
+  (eval-after-load 'lsp-mode (setq lsp-eldoc-enable-hover nil)))
 
 ;;; MODULE {Language support}
 ;;;; Common Lisp
@@ -3777,7 +3799,7 @@ was printed, and only have ElDoc display if one wasn't."
 
   (setq sly-kill-without-query-p t
         sly-net-coding-system 'utf-8-unix
-        ;; Doom defaults to non-fuzzy search, because it is faster and more
+        ;; Radian defaults to non-fuzzy search, because it is faster and more
         ;; precise (but requires more keystrokes). Change this to
         ;; `sly-flex-completions' for fuzzy completion
         sly-complete-symbol-function 'sly-simple-completions)
@@ -4550,9 +4572,7 @@ unhelpful."
 
   :commands helpful--read-symbol
   :bind (;; Remap standard commands.
-         ([remap describe-function] . helpful-callable)
          ([remap describe-command]  . helpful-command)
-         ([remap describe-variable] . helpful-variable)
          ([remap describe-symbol]   . helpful-symbol)
          ([remap describe-key]      . helpful-key)
 
@@ -5104,9 +5124,11 @@ be invoked before `org-mode-hook' is run."
   ;; for these variables. If not, default values will be set in the :config
   ;; section.
   (defvar org-roam-directory nil)
-  (defvar org-roam-db-location nil)
-  (defvar +org-roam-open-buffer-on-find-file t
-    "If non-nil, open the org-roam buffer when opening an org roam file.")
+  (defvar +org-roam-auto-backlinks-buffer nil
+    "If non-nil, open and close the org-roam backlinks buffer automatically.
+This ensures the backlinks buffer is always present so long as an org roam file
+is visible. Once they are all closed or killed, the backlinks buffer will be
+closed.")
   (defvar +org-roam-link-to-org-use-id 'create-if-interactive
     "`org-roam-directory' local value for `org-id-link-to-org-use-id'.
 It's not recommended to set this to nil in order for other parts
@@ -5120,11 +5142,13 @@ of org-mode to properly utilize ID links.")
         org-roam-db-location
         (expand-file-name "org-roam.db" org-roam-directory)
         org-roam-node-display-template
-        "${radian-hierarchy:*} ${radian-tags:45}"
+        (format "${radian-hierarchy:*} %s %s"
+                (propertize "${radian-type:15}" 'face 'font-lock-keyword-face)
+                (propertize "${radian-tags:-1}" 'face 'org-tag))
         org-roam-completion-everywhere t
-        org-roam-mode-section-functions
-        #'(org-roam-backlinks-section org-roam-reflinks-section)
-        org-roam-db-gc-threshold most-positive-fixnum)
+        org-roam-db-gc-threshold most-positive-fixnum
+        ;; Reverse the default to favor faster searchers over slower ones.
+        org-roam-list-files-commands '(fd rg fdfind find))
 
   :increment
   ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
@@ -5182,20 +5206,19 @@ In case of failure, fail gracefully."
   :bind (radian-comma-keymap ("rc". org-roam-capture))
 
   :config
+  (add-to-list 'org-roam-node-template-prefixes '("radian-tags" . "#"))
+  (add-to-list 'org-roam-node-template-prefixes '("radian-type" . "@"))
+
   (setq-hook! 'org-roam-find-file-hook
     org-id-link-to-org-use-id +org-roam-link-to-org-use-id)
 
-  ;; Normally, the org-roam buffer doesn't open until you explicitly call
-  ;; `org-roam'. If `+org-roam-open-buffer-on-find-file' is non-nil, the
-  ;; org-roam buffer will be opened for you whenever you visit a file in
-  ;; `org-roam-directory'.
+  ;; Normally, the org-roam buffer won't open until `org-roam-buffer-toggle' is
+  ;; explicitly called. If `+org-roam-open-buffer-on-find-file' is non-nil, the
+  ;; org-roam buffer will automatically open whenever a file in
+  ;; `org-roam-directory' is visited and closed when no org-roam buffers remain.
   (add-hook! 'org-roam-find-file-hook :append
-    (defun +org-roam-open-with-buffer-maybe-h ()
-      (and +org-roam-open-buffer-on-find-file
-           (not org-roam-capture--node) ; don't proc for roam capture buffers
-           (not org-capture-mode) ; don't proc for normal capture buffers
-           (not (eq 'visible (org-roam-buffer--visibility)))
-           (org-roam-buffer-toggle))))
+    (defun +org-roam-enable-auto-backlinks-buffer-h ()
+      (add-hook 'raidan-switch-buffer-hook #'+org-roam-manage-backlinks-buffer-h)))
 
   (set-popup-rules!
     `((,(regexp-quote org-roam-buffer) ; persistent org-roam buffer
@@ -5206,7 +5229,13 @@ In case of failure, fail gracefully."
   ;; (after! shackle
   ;;   (cl-pushnew '("*org-roam*" :modeline nil :popup t :align right :size 0.22) shackle-rules))
 
-  (add-hook 'org-roam-mode-hook #'turn-on-visual-line-mode))
+  ;; Soft-wrap lines in the backlinks buffer
+  (add-hook 'org-roam-mode-hook #'turn-on-visual-line-mode)
+
+  ;; Use a 'roam:X' link's description if X is empty.
+  ;; TODO PR this upstream?
+  (advice-add #'org-roam-link-follow-link :filter-args #'org-roam-link-follow-link-with-description-a)
+  (advice-add #'org-roam-link-replace-at-point :override #'org-roam-link-replace-at-point-a))
 
 
 ;;;; Filesystem management
@@ -6017,7 +6046,7 @@ No tab will created if the command is cancelled."
          (if (eq major-mode 'org-mode)
              (replace-regexp-in-string
               ".*/[0-9]*-?" "☰ "
-              (subst-char-in-string ?_ ?  buffer-file-name))
+              (subst-char-in-string ?_ ?  (or buffer-file-name "Null")))
            "%b"))
         (:eval (format (if (buffer-modified-p)  " ◉ %s" "  ●  %s")
                        (radian-project-name))))
@@ -6352,7 +6381,7 @@ bound dynamically before being used.")
       inhibit-default-init t
       ;; Shave seconds off startup time by starting the scratch buffer in
       ;; `fundamental-mode', rather than, say, `org-mode' or `text-mode', which
-      ;; pull in a ton of packages. `doom/open-scratch-buffer' provides a better
+      ;; pull in a ton of packages. `radian/open-scratch-buffer' provides a better
       ;; scratch buffer anyway.
       initial-major-mode 'fundamental-mode
       initial-buffer-choice t
@@ -6518,95 +6547,95 @@ the unwritable tidbits."
 ;;; Theme configuration.
 (-ow modus-themes
   :init
-  (setq
-   modus-themes-italic-constructs t
-   modus-themes-bold-constructs t
-   modus-themes-no-mixed-fonts nil
-   modus-themes-subtle-line-numbers t
-   modus-themes-success-deuteranopia nil
-   modus-themes-tabs-accented nil
-   ;; only applies to `customize-set-variable' and related
-   modus-themes-inhibit-reload t
-   modus-themes-intense-markup t
+  (setq modus-themes-italic-constructs t
+        modus-themes-bold-constructs t
+        modus-themes-mixed-fonts nil
+        modus-themes-subtle-line-numbers t
+        modus-themes-deuteranopia nil
+        modus-themes-tabs-accented nil
+        modus-themes-variable-pitch-ui nil
+        modus-themes-inhibit-reload t ; only applies to `customize-set-variable' and related
+        modus-themes-intense-markup t
 
-   modus-themes-fringes nil ; {nil,'subtle,'intense}
+        modus-themes-fringes nil ; {nil,'subtle,'intense}
 
-   ;; Options for `modus-themes-lang-checkers' are either nil (the
-   ;; default), or a list of properties that may include any of those
-   ;; symbols: `straight-underline', `text-also', `background',
-   ;; `intense'
-   modus-themes-lang-checkers '(text-also intense)
+        ;; Options for `modus-themes-lang-checkers' are either nil (the
+        ;; default), or a list of properties that may include any of those
+        ;; symbols: `straight-underline', `text-also', `background',
+        ;; `intense' OR `faint'.
+        modus-themes-lang-checkers '(text-also intense)
 
-   ;; Options for `modus-themes-mode-line' are either nil, or a list
-   ;; that can combine any of `3d' OR `moody', `borderless',
-   ;; `accented', `padded'.
-   modus-themes-mode-line '(moody accented borderless)
+        ;; Options for `modus-themes-mode-line' are either nil, or a list
+        ;; that can combine any of `3d' OR `moody', `borderless',
+        ;; `accented', and a natural number for extra padding
+        modus-themes-mode-line '(moody borderless)
 
-   ;; Options for `modus-themes-syntax' are either nil (the default),
-   ;; or a list of properties that may include any of those symbols:
-   ;; `faint', `yellow-comments', `green-strings', `alt-syntax'
-   modus-themes-syntax '(faint alt-syntax)
+        ;; Options for `modus-themes-markup' are either nil, or a list
+        ;; that can combine any of `bold', `italic', `background',
+        ;; `intense'.
+        modus-themes-markup '(background)
 
-   ;; Options for `modus-themes-hl-line' are either nil (the default),
-   ;; or a list of properties that may include any of those symbols:
-   ;; `accented', `underline', `intense'
-   modus-themes-hl-line '(accented)
+        ;; Options for `modus-themes-syntax' are either nil (the default),
+        ;; or a list of properties that may include any of those symbols:
+        ;; `faint', `yellow-comments', `green-strings', `alt-syntax'
+        modus-themes-syntax '(faint alt-syntax)
 
-   ;; Options for `modus-themes-paren-match' are either nil (the
-   ;; default), or a list of properties that may include any of those
-   ;; symbols: `bold', `intense', `underline'
-   modus-themes-paren-match '(bold intense)
+        ;; Options for `modus-themes-hl-line' are either nil (the default),
+        ;; or a list of properties that may include any of those symbols:
+        ;; `accented', `underline', `intense'
+        modus-themes-hl-line '(accented)
 
-   ;; Options for `modus-themes-links' are either nil (the default),
-   ;; or a list of properties that may include any of those symbols:
-   ;; `neutral-underline' OR `no-underline', `faint' OR `no-color',
-   ;; `bold', `italic', `background'
-   modus-themes-links '(neutral-underline background)
+        ;; Options for `modus-themes-paren-match' are either nil (the
+        ;; default), or a list of properties that may include any of those
+        ;; symbols: `bold', `intense', `underline'
+        modus-themes-paren-match nil
 
-   ;; Options for `modus-themes-prompts' are either nil (the
-   ;; default), or a list of properties that may include any of those
-   ;; symbols: `background', `bold', `gray', `intense', `italic'
-   modus-themes-prompts '(intense bold)
+        ;; Options for `modus-themes-links' are either nil (the default),
+        ;; or a list of properties that may include any of those symbols:
+        ;; `neutral-underline' OR `no-underline', `faint' OR `no-color',
+        ;; `bold', `italic', `background'
+        modus-themes-links '(neutral-underline faint)
 
-   modus-themes-completions 'opinionated ; {nil,'moderate,'opinionated}
+        ;; Options for `modus-themes-prompts' are either nil (the
+        ;; default), or a list of properties that may include any of those
+        ;; symbols: `background', `bold', `gray', `intense', `italic'
+        modus-themes-prompts '(intense bold)
 
-   modus-themes-mail-citations 'monochrome ; {nil,'faint,'monochrome}
+        modus-themes-completions 'moderate ; {nil,'moderate,'opinionated,'super-opinionated}
 
-   ;; Options for `modus-themes-region' are either nil (the default),
-   ;; or a list of properties that may include any of those symbols:
-   ;; `no-extend', `bg-only', `accented'
-   modus-themes-region '(bg-only no-extend accented)
+        modus-themes-mail-citations nil ; {nil,'intense,'faint,'monochrome}
 
-   ;; Options for `modus-themes-diffs': nil, 'desaturated,
-   ;; 'bg-only, 'deuteranopia, 'fg-only-deuteranopia
-   modus-themes-diffs nil
+        ;; Options for `modus-themes-region' are either nil (the default),
+        ;; or a list of properties that may include any of those symbols:
+        ;; `no-extend', `bg-only', `accented'
+        modus-themes-region '(no-extend bg-only accented)
 
-   ;; {nil,'gray-background,'tinted-background}
-   modus-themes-org-blocks 'gray-background
+        ;; Options for `modus-themes-diffs': nil, 'desaturated, 'bg-only
+        modus-themes-diffs nil
 
-   modus-themes-org-agenda ; this is an alist: read the manual or its doc string
-   '((header-block . (variable-pitch scale-title))
-     (header-date . (grayscale workaholic bold-today))
-     (event . (accented italic varied))
-     (scheduled . uniform)
-     (habit . traffic-light-deuteranopia))
+        modus-themes-org-blocks nil ; {nil,'gray-background,'tinted-background}
 
-   modus-themes-headings ; this is an alist: read the manual or its doc string
-   '((1 . (overline background))
-     (2 . (rainbow overline))
-     (t . t))
+        modus-themes-org-agenda ; this is an alist: read the manual or its doc string
+        '((header-block . (variable-pitch regular 1.4))
+          (header-date . (bold-today grayscale underline-today 1.2))
+          (event . (accented varied))
+          (scheduled . uniform)
+          (habit . nil))
 
-   modus-themes-variable-pitch-ui t
-   modus-themes-variable-pitch-headings t
-   modus-themes-scale-headings t
-   modus-themes-scale-1 1.05
-   modus-themes-scale-2 1.1
-   modus-themes-scale-3 1.15
-   modus-themes-scale-4 1.2
-   modus-themes-scale-title 1.3
-   modus-themes-scale-small 0.9))
+        modus-themes-headings nil ; this is an alist: read the manual or its doc string
+
+        ;; ;; For example:
+        ;; modus-themes-headings
+        ;; '((1 . (variable-pitch light 1.8))
+        ;;   (2 . (variable-pitch regular 1.6))
+        ;;   (3 . (variable-pitch regular 1.3))
+        ;;   (4 . (monochrome 1.2))
+        ;;   (5 . (1.1))
+        ;;   (t . (rainbow 1.05)))
+        ))
 
 (-ow nano-theme
+  :disabled t
   :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
   :custom
   (nano-theme-padded-modeline . nil)
@@ -6623,43 +6652,42 @@ the unwritable tidbits."
 (with-no-warnings
   (defun radian/change-theme ()
     (interactive)
-    (let* ((theme-cons (car radian-theme-list))
-           (theme (car theme-cons))
-           (is-dark (cdr theme-cons))
+    (let* ((econf (car radian-theme-list))
+           (theme (car econf))
+           (light (cdr econf))
            (class '((class color) (min-colors 89)))
-           (fg         (if is-dark "#ECEFF4" "#37474F"))
-           (bg         (if is-dark "#2E3440" "#FFFFFF"))
-           (prompt     (if is-dark "violet" "red"))
-           (match      (if is-dark "cyan" "blue"))
-           (match2     (if is-dark "green" "#228b22"))
-           (highlight  (if is-dark "#3B4252" "#FAFAFA"))
-           (critical   (if is-dark "#EBCB8B" "#FF6F00"))
-           (salient    (if is-dark "#81A1C1" "#673AB7"))
-           (strong     (if is-dark "#ECEFF4" "#000000"))
-           (popout     (if is-dark "#D08770" "#FFAB91"))
-           (subtle     (if is-dark "#434C5E" "#ECEFF1"))
-           (faded      (if is-dark "#677691" "#B0BEC5")))
-      (setq radian-theme-list (append (cdr radian-theme-list) (list theme-cons)))
+           (fg         (if light "#37474F" "#ECEFF4"))
+           (bg         (if light "#FFFFFF" "#2E3440"))
+           (prompt     (if light "#F00056" "#FF2D51"))
+           (match      (if light "#057748" "#BCE672"))
+           (highlight  (if light "#FAFAFA" "#3B4252"))
+           (critical   (if light "#FF6F00" "#EBCB8B"))
+           (salient    (if light "#673AB7" "#81A1C1"))
+           (strong     (if light "#000000" "#ECEFF4"))
+           (popout     (if light "#FE8FA2" "#FFAB91"))
+           (subtle     (if light "#ECEFF1" "#434C5E"))
+           (faded      (if light "#B0BEC5" "#677691")))
 
+      (setq radian-theme-list (append (cdr radian-theme-list) (list econf)))
       (letf!
         (defun tinker-theme (theme)
           (custom-theme-set-faces
            theme
            ;; whitespace-line
-           `(whitespace-line ((,class :background "yellow" :foreground "purple")))
+           `(whitespace-line        ((,class :background "yellow" :foreground "purple")))
 
            ;; vertico
-           `(vertico-current ((,class :background ,subtle)))
+           `(vertico-current        ((,class :background ,subtle)))
 
            ;; git-gutter
-           `(git-gutter:added ((,class :background "green")))
-           `(git-gutter:deleted ((,class :background "red")))
-           `(git-gutter:modified ((,class :background ,popout)))
-           `(git-gutter:separator ((,class :background ,salient)))
-           `(git-gutter:unchanged ((,class :background "purple")))
+           `(git-gutter:added       ((,class :background "green")))
+           `(git-gutter:deleted     ((,class :background "red")))
+           `(git-gutter:modified    ((,class :background ,popout)))
+           `(git-gutter:separator   ((,class :background ,salient)))
+           `(git-gutter:unchanged   ((,class :background "purple")))
            ;; git-gutter-fr
-           `(git-gutter-fr:added ((,class :background "green")))
-           `(git-gutter-fr:deleted ((,class :background "red")))
+           `(git-gutter-fr:added    ((,class :background "green")))
+           `(git-gutter-fr:deleted  ((,class :background "red")))
            `(git-gutter-fr:modified ((,class :background ,popout)))
 
            ;; M-x prompt-face
@@ -6668,10 +6696,10 @@ the unwritable tidbits."
           (enable-theme theme))
 
         (cond ((memq theme '(modus-vivendi modus-operandi))
-               (if is-dark
-                   (setq modus-themes-vivendi-color-overrides
+               (if light
+                   (setq modus-themes-operandi-color-overrides
                          `((bg-main . ,bg) (fg-unfocused . ,fg)))
-                 (setq modus-themes-operandi-color-overrides
+                 (setq modus-themes-vivendi-color-overrides
                        `((bg-main . ,bg) (fg-unfocused . ,fg))))
                (disable-theme theme)
                (load-theme theme t)

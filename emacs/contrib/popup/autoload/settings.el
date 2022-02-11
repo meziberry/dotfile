@@ -6,7 +6,7 @@
 ;;;###autoload
 (defvar +popup-defaults
   (list :side   'bottom
-        :height 0.16
+        :height 0.30
         :width  40
         :quit   t
         :select #'ignore

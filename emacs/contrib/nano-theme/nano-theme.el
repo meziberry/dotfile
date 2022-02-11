@@ -115,7 +115,7 @@
       (critical                      (--l?d "#FF6F00" "#EBCB8B"))
       (salient                       (--l?d "#673AB7" "#81A1C1"))
       (strong                        (--l?d "#000000" "#ECEFF4"))
-      (popout                        (--l?d "#FF7FA2" "#D06A70"))
+      (popout                        (--l?d "#FE8FA2" "#FFAB91"))
       (subtle                        (--l?d "#ECEFF1" "#434C5E"))
       (faded                         (--l?d "#B0BEC5" "#677691"))
       (fg-alt                        (--l?d "#505050" "#a8a8a8"))
