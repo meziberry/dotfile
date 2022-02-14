@@ -1,4 +1,4 @@
-;; -*- coding: utf-8; lexical-binding: t; -*-
+;; radian.el --- dotemacs -*- coding: utf-8; lexical-binding: t; -*-
 
 ;; To see the outline of this file, run M-x outline-minor-mode and
 ;; then press C-c @ C-t. To also show the top-level functions and
@@ -188,9 +188,6 @@ in daemon sessions (they are loaded immediately at startup).")
   "List of hooks to run when changing the focused frame"
   :group 'radian-hooks
   :type 'hook)
-
-(defvar radian-theme-list '((modus-operandi . t) (modus-vivendi . nil))
-  "Theme sequence of changing. `(THEME-NAME . IS-LIGHT-THEME)'")
 
 ;;; Radian-require
 (defmacro req! (name &optional path)
@@ -519,15 +516,23 @@ there is a pending network request."
 ;;; Radian keymaps
 ;; REVIEW: if `define-key' called above here, shall lead to "Symbol's
 ;; value as variable is void: \213".
-(defvar radian-comma-keymap (make-sparse-keymap)
-  "Keymap for Radian commands that should be put under a comma prefix.
-This keymap is bound under \\[radian-comma-keymap].")
 
-(defvar radian-keymap (make-sparse-keymap)
-  "Keymap for Radian commands that should be put under a prefix.
+(defvar-keymap radian-comma-keymap
+  :doc "Keymap for Radian commands that should be put under a comma prefix.
+ This keymap is bound under \\[radian-comma-keymap]."
+  :prefix 'radian-comma-keymap)
+
+(defvar-keymap radian-zip-keymap
+  :doc "Keymap for Radian commands that should be put under a zip prefix.
+ This keymap is bound under \\[radian-zip-keymap]."
+  :prefix 'radian-zip-keymap
+  "z" #'eval-last-sexp)
+
+(defvar-keymap radian-keymap
+  :doc "Keymap for Radian commands that should be put under a prefix.
 This keymap is bound under \\[radian-keymap].")
 
-(define-key global-map (kbd "M-P") radian-keymap)
+(define-key global-map "\M-P" radian-keymap)
 
 (defmacro radian-bind-key (key-name command)
   "Bind a key in `radian-keymap'.
@@ -620,7 +625,7 @@ binding the variable dynamically over the entire init-file."
   (load bootstrap-file nil 'nomessage))
 
 ;; Load autoload subdir
-(cl-pushnew "autoload/*.el" straight-default-files-directive)
+(pushnew! straight-default-files-directive "autoload/*.el")
 
 ;; Not using `use-package', `leaf' instead.
 (straight-use-package-mode -1)
@@ -636,6 +641,7 @@ binding the variable dynamically over the entire init-file."
 
 (-ow leaf-keywords
   :require t
+  :bind (radian-comma-keymap ("lf" . leaf-find))
   :config
 
   ;; 1) Add the :increment :aftercall to leaf
@@ -722,7 +728,10 @@ binding the variable dynamically over the entire init-file."
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
 ;;       Here :package imply `eval-after-load'.
 ;;      :bind-keymap imply `require' leaf--name.
-(-ow leaf
+(--w leaf
+  :init
+  (plist-put leaf-system-defaults :leaf-defun nil)
+  (plist-put leaf-system-defaults :leaf-defvar nil)
   :init/el-patch
   (defmacro leaf-key-bind-keymap (key kmap &optional keymap pkg)
     "Bind KEY to KMAP in KEYMAP (`global-map' if not passed).
@@ -756,7 +765,7 @@ If PKG passed, require PKG before binding."
                                        (meow-cancel-selection . meow-keypad-start)
                                        (meow-reverse . meow-open-below)
                                        (meow-replace . meow-replace-char)
-                                       (meow-pop-selection . meow-pop-grab)
+                                       (meow-pop-selection . meow-pop-to-mark)
                                        (meow-kill . meow-C-k)))
 
   :hook (after-init-hook . meow-global-mode)
@@ -1679,7 +1688,7 @@ convert\" UTF8_STRING)'. Disable that."
     (when other-buffer
       (set-window-buffer (next-window) other-buffer))))
 
-(-keys (("C-x |" . split-window-horizontally-instead)
+(-keys (("C-x \\" . split-window-horizontally-instead)
         ("C-x _" . split-window-vertically-instead)))
 
 (defun radian/split-window()
@@ -1737,7 +1746,7 @@ active minibuffer, even if the minibuffer is not selected."
 (-ow! popup
   :straight
   `(popup :local-repo ,(-contrib/ "popup/") :type nil
-          :files ("*.el" "autoload/*")
+          :files ("*.el" "autoload/*.el")
           :build (:not compile))
   :require t)
 
@@ -2117,10 +2126,8 @@ orderless."
 
   (consult-customize
    consult-ripgrep consult-git-grep consult-grep
-   consult-bookmark consult-recent-file
-   ;; +default/search-project +default/search-other-project
-   ;; +default/search-cwd +default/search-other-cwd
-   ;; +default/search-notes-for-symbol-at-point
+   consult-bookmark consult-recent-file consult-xref
+   +vertico/project-search
    consult--source-recent-file consult--source-project-recent-file consult--source-bookmark
    :preview-key (kbd "C-SPC"))
 
@@ -2806,7 +2813,7 @@ buffer."
                                      "[/\\\\]node_modules")))
 
 ;;;; so-long
-(-ow! so-long
+(-ow so-long
   :hook (radian-first-file-hook . global-so-long-mode)
   :config
   (setq so-long-threshold 400) ; reduce false positives w/ larger threshold
@@ -4410,7 +4417,7 @@ enough for the moment."
       ;; auto-fill.
       (setq-local comment-start-skip "// *")))
 
-  (-ow apheleia
+  (--w apheleia
     :config
 
     (add-hook! 'apheleia-post-format-hook
@@ -4531,6 +4538,15 @@ This function calls `json-mode--update-auto-mode' to change the
          ("\\.\\(?:hex\\|nes\\)\\'" . hexl-mode)))
 
 ;;; Introspection
+
+;;;; find files in lisp/ directory
+(defun open-radian-file ()
+  "Open conf file conveniently"
+  (interactive)
+  (let ((default-directory *radian-lisp/*))
+    (call-interactively #'find-file)))
+(-key "f" #'open-radian-file radian-zip-keymap)
+
 ;;;; Help
 
 ;; Feature `help' powers the *Help* buffer and related functionality.
@@ -4930,16 +4946,6 @@ messages."
 ;;;; Organization
 ;; Use `-ow!' here because we already installed Org earlier.
 (-ow! org
-  :preface
-  (pow ox-pandoc)
-  (pow htmlize)
-  (pow orgit)
-  (pow orgit-forge)
-  (pow ox-clip)
-  (sup 'org-appear)
-  (sup 'org-superstar)
-  (sup 'toc-org)
-  (req! -org)
   :chord (",c" . org-capture)
   :increment
   calendar find-func format-spec org-macs org-compat org-faces
@@ -4947,6 +4953,7 @@ messages."
   org-macro ob org org-agenda org-capture
 
   :init
+  (req! -org)
   (setq org-use-property-inheritance t   ; it's convenient to have properties inherited
         org-log-done 'time               ; having the time a item is done sounds convininet
         org-list-allow-alphabetical t    ; have a. A. a) A) list bullets
@@ -4955,7 +4962,12 @@ messages."
         org-re-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js")
 
   :config
-  (-ow! org-appear
+  (pow ox-pandoc)
+  (pow htmlize)
+  (pow orgit)
+  (pow orgit-forge)
+  (pow ox-clip)
+  (pow! org-appear
     :hook (org-mode-hook . org-appear-mode)
     :config
     (setq org-appear-autoemphasis t
@@ -4967,7 +4979,7 @@ messages."
     ;; needs to be run after other hooks have acted.
     (run-at-time nil nil #'org-appear--set-elements))
 
-  (-ow! org-superstar
+  (pow! org-superstar
     :hook (org-mode-hook . org-superstar-mode)
     :config
     (setq org-superstar-leading-bullet ?\s
@@ -4979,7 +4991,7 @@ messages."
           org-superstar-headline-bullets-list '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶")
           org-superstar-prettify-item-bullets t ))
 
-  (-ow! toc-org ; auto-table of contents
+  (pow! toc-org ; auto-table of contents
     :hook (org-mode-hook . toc-org-enable)
     :config
     (setq toc-org-hrefify-default "gh")
@@ -5265,6 +5277,8 @@ non-nil value to enable trashing for file operations."
   (osx-trash-setup))
 
 ;;;;; Dired
+(pow! dirvish :hook (radian-first-file-hook . dirvish-override-dired-mode))
+
 ;; Dired has some trouble parsing out filenames that have e.g. leading
 ;; spaces, unless the ls program used has support for Dired. GNU ls
 ;; has this support, so if it is available we tell Dired (and the
@@ -5646,7 +5660,7 @@ changes, which means that `git-gutter' needs to be re-run.")
                 (unless (file-remote-p buffer-file-name)
                   (git-gutter)))))))))
 
-  (-ow autorevert
+  (--w autorevert
     :config
 
     (add-hook! 'after-revert-hook
@@ -5655,7 +5669,7 @@ changes, which means that `git-gutter' needs to be re-run.")
         (when git-gutter-mode
           (git-gutter)))))
 
-  (-ow apheleia
+  (--w apheleia
     :config
     (add-hook! 'apheleia-post-format-hook
       (defun radian--git-gutter-after-apheleia ()
@@ -6544,177 +6558,8 @@ the unwritable tidbits."
       (setq-local register-alist
                   (cl-remove-if-not #'savehist-printable register-alist)))))
 
-;;; Theme configuration.
-(-ow modus-themes
-  :init
-  (setq modus-themes-italic-constructs t
-        modus-themes-bold-constructs t
-        modus-themes-mixed-fonts nil
-        modus-themes-subtle-line-numbers t
-        modus-themes-deuteranopia nil
-        modus-themes-tabs-accented nil
-        modus-themes-variable-pitch-ui nil
-        modus-themes-inhibit-reload t ; only applies to `customize-set-variable' and related
-        modus-themes-intense-markup t
-
-        modus-themes-fringes nil ; {nil,'subtle,'intense}
-
-        ;; Options for `modus-themes-lang-checkers' are either nil (the
-        ;; default), or a list of properties that may include any of those
-        ;; symbols: `straight-underline', `text-also', `background',
-        ;; `intense' OR `faint'.
-        modus-themes-lang-checkers '(text-also intense)
-
-        ;; Options for `modus-themes-mode-line' are either nil, or a list
-        ;; that can combine any of `3d' OR `moody', `borderless',
-        ;; `accented', and a natural number for extra padding
-        modus-themes-mode-line '(moody borderless)
-
-        ;; Options for `modus-themes-markup' are either nil, or a list
-        ;; that can combine any of `bold', `italic', `background',
-        ;; `intense'.
-        modus-themes-markup '(background)
-
-        ;; Options for `modus-themes-syntax' are either nil (the default),
-        ;; or a list of properties that may include any of those symbols:
-        ;; `faint', `yellow-comments', `green-strings', `alt-syntax'
-        modus-themes-syntax '(faint alt-syntax)
-
-        ;; Options for `modus-themes-hl-line' are either nil (the default),
-        ;; or a list of properties that may include any of those symbols:
-        ;; `accented', `underline', `intense'
-        modus-themes-hl-line '(accented)
-
-        ;; Options for `modus-themes-paren-match' are either nil (the
-        ;; default), or a list of properties that may include any of those
-        ;; symbols: `bold', `intense', `underline'
-        modus-themes-paren-match nil
-
-        ;; Options for `modus-themes-links' are either nil (the default),
-        ;; or a list of properties that may include any of those symbols:
-        ;; `neutral-underline' OR `no-underline', `faint' OR `no-color',
-        ;; `bold', `italic', `background'
-        modus-themes-links '(neutral-underline faint)
-
-        ;; Options for `modus-themes-prompts' are either nil (the
-        ;; default), or a list of properties that may include any of those
-        ;; symbols: `background', `bold', `gray', `intense', `italic'
-        modus-themes-prompts '(intense bold)
-
-        modus-themes-completions 'moderate ; {nil,'moderate,'opinionated,'super-opinionated}
-
-        modus-themes-mail-citations nil ; {nil,'intense,'faint,'monochrome}
-
-        ;; Options for `modus-themes-region' are either nil (the default),
-        ;; or a list of properties that may include any of those symbols:
-        ;; `no-extend', `bg-only', `accented'
-        modus-themes-region '(no-extend bg-only accented)
-
-        ;; Options for `modus-themes-diffs': nil, 'desaturated, 'bg-only
-        modus-themes-diffs nil
-
-        modus-themes-org-blocks nil ; {nil,'gray-background,'tinted-background}
-
-        modus-themes-org-agenda ; this is an alist: read the manual or its doc string
-        '((header-block . (variable-pitch regular 1.4))
-          (header-date . (bold-today grayscale underline-today 1.2))
-          (event . (accented varied))
-          (scheduled . uniform)
-          (habit . nil))
-
-        modus-themes-headings nil ; this is an alist: read the manual or its doc string
-
-        ;; ;; For example:
-        ;; modus-themes-headings
-        ;; '((1 . (variable-pitch light 1.8))
-        ;;   (2 . (variable-pitch regular 1.6))
-        ;;   (3 . (variable-pitch regular 1.3))
-        ;;   (4 . (monochrome 1.2))
-        ;;   (5 . (1.1))
-        ;;   (t . (rainbow 1.05)))
-        ))
-
-(-ow nano-theme
-  :disabled t
-  :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
-  :custom
-  (nano-theme-padded-modeline . nil)
-  (nano-theme-header-scales . '(1.3 0.95 0.85 0.75 0.7 0.7 0.7))
-  :config
-  (eval-when! (boundp 'ns-system-appearance)
-    (add-to-list
-     'ns-system-appearance-change-functions
-     (lambda (l?d) (setq nano-theme-light/dark l?d)
-       (mapc #'disable-theme custom-enabled-themes)
-       (load-theme 'nano t)))))
-
-;;;; change theme and customize face.
-(with-no-warnings
-  (defun radian/change-theme ()
-    (interactive)
-    (let* ((econf (car radian-theme-list))
-           (theme (car econf))
-           (light (cdr econf))
-           (class '((class color) (min-colors 89)))
-           (fg         (if light "#37474F" "#ECEFF4"))
-           (bg         (if light "#FFFFFF" "#2E3440"))
-           (prompt     (if light "#F00056" "#FF2D51"))
-           (match      (if light "#057748" "#BCE672"))
-           (highlight  (if light "#FAFAFA" "#3B4252"))
-           (critical   (if light "#FF6F00" "#EBCB8B"))
-           (salient    (if light "#673AB7" "#81A1C1"))
-           (strong     (if light "#000000" "#ECEFF4"))
-           (popout     (if light "#FE8FA2" "#FFAB91"))
-           (subtle     (if light "#ECEFF1" "#434C5E"))
-           (faded      (if light "#B0BEC5" "#677691")))
-
-      (setq radian-theme-list (append (cdr radian-theme-list) (list econf)))
-      (letf!
-        (defun tinker-theme (theme)
-          (custom-theme-set-faces
-           theme
-           ;; whitespace-line
-           `(whitespace-line        ((,class :background "yellow" :foreground "purple")))
-
-           ;; vertico
-           `(vertico-current        ((,class :background ,subtle)))
-
-           ;; git-gutter
-           `(git-gutter:added       ((,class :background "green")))
-           `(git-gutter:deleted     ((,class :background "red")))
-           `(git-gutter:modified    ((,class :background ,popout)))
-           `(git-gutter:separator   ((,class :background ,salient)))
-           `(git-gutter:unchanged   ((,class :background "purple")))
-           ;; git-gutter-fr
-           `(git-gutter-fr:added    ((,class :background "green")))
-           `(git-gutter-fr:deleted  ((,class :background "red")))
-           `(git-gutter-fr:modified ((,class :background ,popout)))
-
-           ;; M-x prompt-face
-           `(minibuffer-prompt      ((,class (:foreground ,prompt))))
-           `(comint-highlight-input ((,class (:foreground "green" :bold t)))))
-          (enable-theme theme))
-
-        (cond ((memq theme '(modus-vivendi modus-operandi))
-               (if light
-                   (setq modus-themes-operandi-color-overrides
-                         `((bg-main . ,bg) (fg-unfocused . ,fg)))
-                 (setq modus-themes-vivendi-color-overrides
-                       `((bg-main . ,bg) (fg-unfocused . ,fg))))
-               (disable-theme theme)
-               (load-theme theme t)
-               (tinker-theme theme))
-              ((eq theme 'nano)
-               (if (eq (car custom-enabled-themes) 'nano)
-                   (nano-theme-toggle)
-                 (load-theme theme t)))
-              (t
-               (disable-theme theme)
-               (load-theme theme t)
-               (tinker-theme theme)))))
-    (radian-run-hooks 'radian-load-theme-hook)))
-
-(-key "M-h" #'radian/change-theme)
+;;; Theme and face.
+(req! -theme)
 
 ;;;;;;; --> Expose <radian-after-init-hook> contents
 (radian--run-hook after-init)

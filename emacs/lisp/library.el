@@ -513,12 +513,12 @@ serve as a predicated alternative to `after!'."
         `(progn
            (fset ',fn (lambda (&rest args)
                         (when ,(or condition t)
-                          (remove-hook 'after-load-functions #',fn)
+                          (remove-hook 'after-load-functions ',fn)
                           (unintern ',fn nil)
                           (ignore args)
                           ,@body)))
            (put ',fn 'permanent-local-hook t)
-           (add-hook 'after-load-functions #',fn)))))
+           (add-hook 'after-load-functions ',fn)))))
 
 (defmacro defer-feature! (feature &rest fns)
   "Pretend FEATURE hasn't been loaded yet, until FEATURE-hook or FN runs.
@@ -799,10 +799,6 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
       fn)))
 
 (defmacro spp (form) "Super pp" `(progn (pp ,form) nil))
-(defmacro mpp (form &optional all)
-  "Output expanded form of given FORM."
-  (let ((expand (if all 'macroexpand-all 'macroexpand-1)))
-    `(spp (,expand ',form))))
 
 ;;; Wraps of leaf and straight
 (defmacro pow! (name &rest args)
@@ -827,7 +823,6 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
   (declare (indent 1)) `(leaf ,name :loading nil ,@args))
 
 (defalias 'sup #'straight-use-package)
-
 (defalias '-key 'leaf-key)
 (defalias '-key* 'leaf-key*)
 (defalias '-keys 'leaf-keys)

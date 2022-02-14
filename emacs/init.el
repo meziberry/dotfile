@@ -20,7 +20,7 @@ loading the init-file twice if it were not for this variable.")
  (t
   (setq radian--init-file-loaded-p t)
 
-  (defvar radian-minimum-emacs-version "27"
+  (defvar radian-minimum-emacs-version "28"
     "Radian Emacs does not support any Emacs version below this.")
 
   (defvar radian-local-init-file
