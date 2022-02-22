@@ -93,26 +93,6 @@ dependencies or long-term shared data. Must end with a slash.")
 Use this for files that don't change much, like server binaries, external
 dependencies or long-term shared data. Must end with a slash.")
 
-;; Incrementally
-(defvar radian-incremental-packages '(t)
-  "A list of packages to load incrementally after startup. Any large packages
-here may cause noticeable pauses, so it's recommended you break them up into
-sub-packages. For example, `org' is comprised of many packages, and can be
-broken up into:
-
-  (radian-load-incrementally
-   '(calendar find-func format-spec org-macs org-compat
-     org-faces org-entities org-list org-pcomplete org-src
-     org-footnote org-macro ob org org-clock org-agenda
-     org-capture))
-
-This is already done by the lang/org module, however.
-
-If you want to disable incremental loading altogether, either remove
-`radian-load-packages-incrementally-h' from `emacs-startup-hook' or set
-`radian-incremental-first-idle-timer' to nil. Incremental loading does not occur
-in daemon sessions (they are loaded immediately at startup).")
-
 ;; Remember these variables' initial values, so we can safely reset them at a
 ;; later time, or consult them without fear of contamination.
 (dolist (var '(exec-path load-path process-environment))
@@ -470,6 +450,33 @@ hook directly into the init-file during byte-compilation."
 ;; substitute to suppress them.
 (unless (fboundp 'define-fringe-bitmap) (fset 'define-fringe-bitmap #'ignore))
 
+
+;;;; EasyPG/EPG(GNU Privacy Guard(GnuPG))
+(after! epa
+  ;; With GPG 2.1+, this forces gpg-agent to use the Emacs minibuffer to prompt
+  ;; for the key passphrase.
+  (set 'epg-pinentry-mode 'loopback)
+  ;; Default to the first enabled and non-expired key in your keyring.
+  (setq-default
+   epa-file-encrypt-to
+   (or (default-value 'epa-file-encrypt-to)
+       (unless (string-empty-p user-full-name)
+         (when-let (context (ignore-errors (epg-make-context)))
+           (cl-loop for key in (epg-list-keys context user-full-name 'public)
+                    for subkey = (car (epg-key-sub-key-list key))
+                    if (not (memq 'disabled (epg-sub-key-capability subkey)))
+                    if (< (or (epg-sub-key-expiration-time subkey) 0)
+                          (time-to-seconds))
+                    collect (epg-sub-key-fingerprint subkey))))
+       user-mail-address))
+   ;; And suppress prompts if epa-file-encrypt-to has a default value (without
+   ;; overwriting file-local values).
+  (defadvice! +default--dont-prompt-for-keys-a (&rest _)
+    :before #'epa-file-write-region
+    (unless (local-variable-p 'epa-file-encrypt-to)
+      (setq-local epa-file-encrypt-to (default-value 'epa-file-encrypt-to)))))
+
+
 ;;; Networking
 
 ;; Emacs is essentially one huge security vulnerability, what with all the
@@ -755,8 +762,8 @@ If PKG passed, require PKG before binding."
 (pow blackout)
 
 ;;;; Meow
-(-ow meow
-  :straight (meow :repo "meziberry/meow" :branch "develop")
+(pow meow
+  :straight (meow :repo "meow-edit/meow" :branch "master")
   :custom
   (meow-use-cursor-position-hack . t)
   (meow-use-enhanced-selection-effect . t)
@@ -769,6 +776,32 @@ If PKG passed, require PKG before binding."
                                        (meow-kill . meow-C-k)))
 
   :hook (after-init-hook . meow-global-mode)
+  :config/el-patch
+  (defun meow-change ()
+    "Kill current selection and switch to INSERT state.
+This command supports `meow-selection-command-fallback'."
+    (interactive)
+    (el-patch-splice 2
+      (when (meow--allow-modify-p)
+        (meow--with-selection-fallback
+         (el-patch-wrap 2
+           (when (meow--allow-modify-p)
+             (delete-region (region-beginning) (region-end))
+             (meow--switch-state 'insert)
+             (setq-local meow--insert-pos (point))))))))
+
+  (defun meow-cancel-selection ()
+    "Cancel selection or grab.
+This command supports `meow-selection-command-fallback'."
+    (interactive)
+    (el-patch-wrap 2 3
+      (if (not (secondary-selection-exist-p))
+          (meow--with-selection-fallback (meow--cancel-selection))
+        ;; cancel `meow-grab' selection
+        (delete-overlay mouse-secondary-overlay)
+        (setq mouse-secondary-start (make-marker))
+        (move-marker mouse-secondary-start (point)))))
+
   :config
   (cl-pushnew '(help-mode . motion) meow-mode-state-list)
   (after! consult
@@ -782,7 +815,7 @@ into `regexp-search-ring'"
     (advice-add 'consult--line :after #'+consult--line-a))
 
   :blackout
-  (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode))
+  (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode meow-beacon-mode))
 
 ;;; MODULE {Radian-foundation}
 ;; autoloads
@@ -821,6 +854,26 @@ into `regexp-search-ring'"
 ;;;; Incremental lazy-loading
 (--w incremental
   :config
+  ;; Incrementally
+  (defvar radian-incremental-packages '(t)
+    "A list of packages to load incrementally after startup. Any large packages
+here may cause noticeable pauses, so it's recommended you break them up into
+sub-packages. For example, `org' is comprised of many packages, and can be
+broken up into:
+
+  (radian-load-incrementally
+   '(calendar find-func format-spec org-macs org-compat
+     org-faces org-entities org-list org-pcomplete org-src
+     org-footnote org-macro ob org org-clock org-agenda
+     org-capture))
+
+This is already done by the lang/org module, however.
+
+If you want to disable incremental loading altogether, either remove
+`radian-load-packages-incrementally-h' from `emacs-startup-hook' or set
+`radian-incremental-first-idle-timer' to nil. Incremental loading does not occur
+in daemon sessions (they are loaded immediately at startup).")
+
   (defvar radian-incremental-first-idle-timer 2.0
     "How long (in idle seconds) until incremental loading starts.
 Set this to nil to disable incremental loading.")
@@ -1346,16 +1399,15 @@ unquote it using a comma."
 ;; Package `which-key' displays the key bindings and associated
 ;; commands following the currently-entered key prefix in a popup.
 (pow! which-key
-  :config
+  :init (which-key-mode +1)
 
+  :config
   ;; We configure it so that `which-key' is triggered by typing C-h
   ;; during a key sequence (the usual way to show bindings). See
   ;; <https://github.com/justbur/emacs-which-key#manual-activation>.
-  ;; (setq which-key-show-early-on-C-h t)
-  ;; (setq which-key-idle-delay most-positive-fixnum)
-  ;; (setq which-key-idle-secondary-delay 1e-100)
-
-  (which-key-mode +1)
+  (setq which-key-show-early-on-C-h t)
+  (setq which-key-idle-delay most-positive-fixnum)
+  (setq which-key-idle-secondary-delay 1e-100)
 
   :blackout t)
 
@@ -2290,11 +2342,17 @@ DIR must include a .project file to be considered a project."
 
   :blackout t)
 
+
+;;;; auth-source
 ;; Feature `auth-source' reads and writes secrets from files like
 ;; ~/.netrc for TRAMP and related packages, so for example you can
 ;; avoid having to type in a particular host's password every time.
-(-ow! auth-source
+(-ow auth-source
   :config
+  ;; Emacs stores `authinfo' in $HOME and in plain-text. Let's not do that, mkay?
+  ;; This file stores usernames, passwords, and other such treasures for the
+  ;; aspiring malicious third party.
+  ;; (setq auth-sources (list "~/.authinfo.gpg"))
 
   (defvar radian--auth-source-blacklist-file
     (no-littering-expand-var-file-name "auth-source/blacklist.el")
@@ -2793,7 +2851,7 @@ buffer."
         (set-window-configuration radian--ediff-saved-wconf)))))
 
 ;;;; server
-(-ow! server
+(-ow server
   :when (display-graphic-p)
   :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
@@ -2804,7 +2862,11 @@ buffer."
     (server-start)))
 
 ;;;; tramp
-(after! tramp
+(-ow tramp
+  :init
+  (unless IS-WINDOWS
+    (setq tramp-default-method "ssh")) ; faster than the default scp
+  :defer-config
   (setq remote-file-name-inhibit-cache 60
         tramp-verbose 1
         vc-ignore-dir-regexp (format "%s\\|%s\\|%s"
@@ -2816,7 +2878,24 @@ buffer."
 (-ow so-long
   :hook (radian-first-file-hook . global-so-long-mode)
   :config
-  (setq so-long-threshold 400) ; reduce false positives w/ larger threshold
+  ;; Emacs 29 introduced faster long-line detection, so they can afford a much
+  ;; larger `so-long-threshold' and its default `so-long-predicate'.
+  (if (fboundp 'buffer-line-statistics)
+      (unless IS-NATIVECOMP (setq so-long-threshold 5000))
+    ;; reduce false positives w/ larger threshold
+    (setq so-long-threshold 400)
+
+    (defun radian-buffer-has-long-lines-p ()
+      (unless (bound-and-true-p visual-line-mode)
+        (let ((so-long-skip-leading-comments
+               ;; HACK Fix #2183: `so-long-detected-long-line-p' calls
+               ;;   `comment-forward' which tries to use comment syntax, which
+               ;;   throws an error if comment state isn't initialized, leading
+               ;;   to a wrong-type-argument: stringp error.
+               ;; DEPRECATED Fixed in Emacs 28.
+               (bound-and-true-p comment-use-syntax)))
+          (so-long-detected-long-line-p))))
+    (setq so-long-predicate 'radian-buffer-has-long-lines-p))
   ;; Don't disable syntax highlighting and line numbers, or make the buffer
   ;; read-only, in `so-long-minor-mode', so we can have a basic editing
   ;; experience in them, at least. It will remain off in `so-long-mode',
@@ -2831,26 +2910,19 @@ buffer."
   ;; But disable everything else that may be unnecessary/expensive for large or
   ;; wide buffers.
   (appendq! so-long-minor-modes
-            '(flycheck-mode
-              spell-fu-mode
+            '(spell-fu-mode
               eldoc-mode
-              smartparens-mode
               highlight-numbers-mode
               better-jumper-local-mode
               ws-butler-mode
               auto-composition-mode
               undo-tree-mode
               highlight-indent-guides-mode
-              hl-fill-column-mode))
-  (defun radian-buffer-has-long-lines-p ()
-    (unless (bound-and-true-p visual-line-mode)
-      (let ((so-long-skip-leading-comments
-             ;; HACK Fix #2183: `so-long-detected-long-line-p' tries to parse
-             ;;      comment syntax, but comment state may not be initialized,
-             ;;      leading to a wrong-type-argument: stringp error.
-             (bound-and-true-p comment-use-syntax)))
-        (so-long-detected-long-line-p))))
-  (setq so-long-predicate #'radian-buffer-has-long-lines-p))
+              hl-fill-column-mode
+              ;; These are redundant on Emacs 29+
+              flycheck-mode
+              smartparens-mode
+              smartparens-strict-mode)))
 
 ;;;; prettify
 (-ow prog-mode
@@ -3345,13 +3417,55 @@ set LSP configuration (see `lsp-python-ms')."
         (lsp))))
   ;; (setq xref-backend-functions (remq 'lsp--xref-backend xref-backend-functions))
 
-  :bind (lsp-mode-map ("C-c C-a" . consult-lsp-symbols))
+  :bind (lsp-mode-map ([remap xref-find-apropos] . consult-lsp-symbols))
   :hook (after-change-major-mode-hook . radian--lsp-enable)
 
   :init
+  (defvar +lsp-defer-shutdown 3
+    "If non-nil, defer shutdown of LSP servers for this many seconds after last
+workspace buffer is closed.
+
+This delay prevents premature server shutdown when a user still intends on
+working on that project after closing the last buffer, or when programmatically
+killing and opening many LSP/eglot-powered buffers.")
+
+  (defvar +lsp--default-read-process-output-max nil)
+  (defvar +lsp--default-gcmh-high-cons-threshold nil)
+  (defvar +lsp--optimization-init-p nil)
+  (define-minor-mode +lsp-optimization-mode
+    "Deploys universal GC and IPC optimizations for `lsp-mode' and `eglot'."
+    :global t
+    :init-value nil
+    (if (not +lsp-optimization-mode)
+        (setq-default read-process-output-max +lsp--default-read-process-output-max
+                      gcmh-high-cons-threshold +lsp--default-gcmh-high-cons-threshold
+                      +lsp--optimization-init-p nil)
+      ;; Only apply these settings once!
+      (unless +lsp--optimization-init-p
+        (setq +lsp--default-read-process-output-max
+              (default-value 'read-process-output-max)
+              +lsp--default-gcmh-high-cons-threshold
+              (default-value 'gcmh-high-cons-threshold))
+        ;; `read-process-output-max' is only available on recent development
+        ;; builds of Emacs 27 and above.
+        (setq-default read-process-output-max (* 1024 1024))
+        ;; REVIEW LSP causes a lot of allocations, with or without Emacs 27+'s
+        ;;        native JSON library, so we up the GC threshold to stave off
+        ;;        GC-induced slowdowns/freezes. Radian uses `gcmh' to enforce its
+        ;;        GC strategy, so we modify its variables rather than
+        ;;        `gc-cons-threshold' directly.
+        (setq-default gcmh-high-cons-threshold (* 2 +lsp--default-gcmh-high-cons-threshold))
+        (gcmh-set-high-threshold)
+        (setq +lsp--optimization-init-p t))))
+
+  ;; Don't auto-kill LSP server after last workspace buffer is killed, because I
+  ;; will do it for you, after `+lsp-defer-shutdown' seconds.
+  (setq lsp-keep-workspace-alive nil)
   (setq lsp-modeline-code-actions-enable nil
+        ;; Make breadcrumbs opt-in; they're redundant with the modeline and imenu
         lsp-headerline-breadcrumb-enable nil
-        ;; Reduce unexpected modifications to code
+        ;; Disable LSP reformatting your code as you type. We use Apheleia
+        ;; for that instead.
         lsp-enable-on-type-formatting nil
         ;; Disable features that have great potential to be slow.
         lsp-enable-folding nil
@@ -3362,8 +3476,7 @@ set LSP configuration (see `lsp-python-ms')."
   ;; otherwise we might not be able to find the LSP server binaries.
   (radian-env-setup)
 
-  ;; As per <https://github.com/emacs-lsp/lsp-mode#performance>.
-  (setq read-process-output-max (* 1024 1024))
+  (set-popup-rule! "^\\*lsp-\\(help\\|install\\)" :size 0.35 :quit t :select t)
 
   (defun radian--advice-lsp-mode-silence (format &rest args)
     "Silence needless diagnostic messages from `lsp-mode'.
@@ -3403,6 +3516,42 @@ functions."
           (when (file-executable-p binary)
             (cl-return (cons binary (cdr command))))))))
 
+  (add-hook! 'lsp-mode-hook
+    (defun +lsp-display-guessed-project-root-h ()
+      "Log what LSP things is the root of the current project."
+      ;; Makes it easier to detect root resolution issues.
+      (when-let (path (buffer-file-name (buffer-base-buffer)))
+        (if-let (root (lsp--calculate-root (lsp-session) path))
+            (lsp--info "Guessed project root is %s" (abbreviate-file-name root))
+          (lsp--info "Could not guess project root."))))
+    #'+lsp-optimization-mode)
+
+  (defvar +lsp--deferred-shutdown-timer nil)
+  (defadvice! +lsp-defer-server-shutdown-a (fn &optional restart)
+    "Defer server shutdown for a few seconds.
+This gives the user a chance to open other project files before the server is
+auto-killed (which is a potentially expensive process). It also prevents the
+server getting expensively restarted when reverting buffers."
+    :around #'lsp--shutdown-workspace
+    (if (or lsp-keep-workspace-alive
+            restart
+            (null +lsp-defer-shutdown)
+            (= +lsp-defer-shutdown 0))
+        (prog1 (funcall fn restart)
+          (+lsp-optimization-mode -1))
+      (when (timerp +lsp--deferred-shutdown-timer)
+        (cancel-timer +lsp--deferred-shutdown-timer))
+      (setq +lsp--deferred-shutdown-timer
+            (run-at-time
+             (if (numberp +lsp-defer-shutdown) +lsp-defer-shutdown 3)
+             nil (lambda (workspace)
+                   (with-lsp-workspace workspace
+                     (unless (lsp--workspace-buffers workspace)
+                       (let ((lsp-restart 'ignore))
+                         (funcall fn))
+                       (+lsp-optimization-mode -1))))
+             lsp--cur-workspace))))
+
   (add-hook! 'kill-emacs-hook
     (defun radian--lsp-teardown ()
       "Ignore the LSP server getting killed.
@@ -3424,10 +3573,6 @@ killed (which happens during Emacs shutdown)."
                 (format "\\.%s\\'" (match-string 1 (car link))) (cdr link))
              link))
          lsp-language-id-configuration))
-
-  ;; Disable LSP reformatting your code as you type. We use Apheleia
-  ;; for that instead.
-  (setq lsp-enable-on-type-formatting nil)
 
   :blackout " LSP")
 
@@ -3647,7 +3792,7 @@ menu to disappear and then come back after `company-idle-delay'."
     (defun dumb-jump-enable ()
       "enable `dumb-jump'"
       (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t)))
-  :bind* (("C-M-d" . xref-find-references)))
+  :bind* (("C-M-f" . xref-find-references)))
 
 ;;;; Display contextual metadata
 
@@ -3706,27 +3851,22 @@ was printed, and only have ElDoc display if one wasn't."
 ;; Flycheck anywhere else and rely on `lsp-ui' to handle things when
 ;; appropriate. However, interestingly, Flycheck is not marked as a
 ;; dependency of `lsp-ui', hence this declaration.
-(pow! flycheck
-  :config
-
-  ;; For use with `lsp-ui'.
-  (radian-bind-key "p" #'flycheck-previous-error)
-  (radian-bind-key "n" #'flycheck-next-error)
-
-  :blackout t)
+(pow! flycheck :blackout t)
 
 ;; Package `lsp-ui' provides a pretty UI for showing diagnostic
 ;; messages from LSP in the buffer using overlays. It's configured
 ;; automatically by `lsp-mode'.
 (pow! lsp-ui
-  :bind (lsp-ui-mode-map ("C-c f" . lsp-ui-sideline-apply-code-actions))
+  :bind (lsp-ui-mode-map ("C-c f" . lsp-ui-sideline-apply-code-actions)
+                         ([remap xref-find-definitions] . lsp-ui-peek-find-definitions)
+                         ([remap xref-find-references] . lsp-ui-peek-find-references) )
   :config
+  ;; With `lsp-ui', there's no need for the ElDoc integration
+  ;; provided by `lsp-mode', and in fact for Bash it is very
+  ;; annoying since all the hover information is multiline.
+  (eval-after-load 'lsp-mode (setq lsp-eldoc-enable-hover nil))
 
-  (setq lsp-ui-peek-enable (featurep! '+peek)
-        lsp-ui-doc-max-height 8
-        lsp-ui-doc-max-width 35
-        ;; lsp-ui-doc-show-with-mouse nil  ; don't disappear on mouseover
-
+  (setq lsp-ui-peek-enable t
         ;; Don't show symbol definitions in the sideline. They are pretty noisy,
         ;; and there is a bug preventing Flycheck errors from being shown (the
         ;; errors flash briefly and then disappear).
@@ -3745,13 +3885,17 @@ was printed, and only have ElDoc display if one wasn't."
                 (apply completing-read prompt collection args))))
       (apply orig-fun args)))
 
-  (-ow lsp-ui-imenu
-    :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
+  (-ow lsp-ui-imenu :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
 
   ;; Feature `lsp-ui-doc' from package `lsp-ui' displays documentation
   ;; in a child frame when point is on a symbol.
   (-ow lsp-ui-doc
     :config
+    (setq lsp-ui-doc-max-height 10
+          lsp-ui-doc-max-width 40
+          lsp-ui-doc-show-with-mouse t
+          lsp-ui-doc-show-with-cursor nil)
+
     ;; https://github.com/emacs-lsp/lsp-ui/issues/414
     (add-to-list 'lsp-ui-doc-frame-parameters '(no-accept-focus . t))
     (defadvice! radian--advice-lsp-ui-doc-allow-multiline (func &rest args)
@@ -3763,12 +3907,7 @@ was printed, and only have ElDoc display if one wasn't."
                     string
                   (apply replace-regexp-in-string
                          regexp rep string args))))
-        (apply func args))))
-
-  ;; With `lsp-ui', there's no need for the ElDoc integration
-  ;; provided by `lsp-mode', and in fact for Bash it is very
-  ;; annoying since all the hover information is multiline.
-  (eval-after-load 'lsp-mode (setq lsp-eldoc-enable-hover nil)))
+        (apply func args)))))
 
 ;;; MODULE {Language support}
 ;;;; Common Lisp
@@ -4514,8 +4653,7 @@ This function calls `json-mode--update-auto-mode' to change the
 (pow! pkgbuild-mode)
 
 ;; Package `ssh-config-mode' provides major modes for files in ~/.ssh.
-(pow! ssh-config-mode
-  :blackout "SSH-Config")
+(pow! ssh-config-mode :blackout "SSH-Config")
 
 ;; Package `terraform-mode' provides major modes for Terraform
 ;; configuration files.
@@ -5357,7 +5495,7 @@ the problematic case.)"
   ;; message. (A message is shown if insta-revert is either disabled
   ;; or determined dynamically by setting this variable to a
   ;; function.)
-  (setq dired-auto-revert-buffer t))
+  (setq dired-auto-revert-buffer #'dired-buffer-stale-p))
 
 (-ow dired-x
   :bind (;; Bindings for jumping to the current directory in Dired.
@@ -6042,17 +6180,32 @@ No tab will created if the command is cancelled."
 
 ;;;; Appearance
 (appendq! initial-frame-alist
-              '((tool-bar-lines . 0)
-                (fullscreen . maximized)
-                ;;(width . 100)
-                ;;(height . 30)
-                ;;(left . 50)
-                ;;(top . 50)
-                ;;(undecorated . t)
-                (internal-border-width . 0)
-                (alpha-background . 80)
-                (alpha . (95 . 80))))
+          '((tool-bar-lines . 0)
+            ;;;; only on unix
+            ;; (icon-type . nil)
+            ;; (alpha-background . 80)
+
+            ;; (fullscreen . maximized)
+            ;;(undecorated . t)
+            (internal-border-width . 0)
+            (alpha . (95 . 80))))
 (appendq! default-frame-alist initial-frame-alist)
+
+;; Save/Restor last frame parameters
+(when-let (dims (radian-store-get 'last-frame-size "default"))
+  (cl-destructuring-bind ((left . top) width height) dims
+    (setq initial-frame-alist
+          (append initial-frame-alist
+                  `((left . ,left)
+                    (top . ,top)
+                    (width . ,width)
+                    (height . ,height))))))
+(defun save-frame-dimensions ()
+  (radian-store-put 'last-frame-size
+                    (list (frame-position)
+                          (frame-width)
+                          (frame-height))))
+(add-hook 'kill-emacs-hook #'save-frame-dimensions)
 
 (setq frame-title-format
       '(""
@@ -6064,7 +6217,6 @@ No tab will created if the command is cancelled."
            "%b"))
         (:eval (format (if (buffer-modified-p)  " ◉ %s" "  ●  %s")
                        (radian-project-name))))
-
       icon-title-format frame-title-format)
 
 ;; Allow you to resize frames however you want, not just in whole
@@ -6423,11 +6575,6 @@ bound dynamically before being used.")
 ;; slightly from 0.5s:
 (setq idle-update-delay 1.0)
 
-;; Emacs stores `authinfo' in $HOME and in plain-text. Let's not do that, mkay?
-;; This file stores usernames, passwords, and other such treasures for the
-;; aspiring malicious third party.
-;; (setq auth-sources (list "~/.authinfo.gpg"))
-
 ;; Don't prompt for confirmation when we create a new file or buffer (assume the
 ;; user knows what they're doing).
 (setq confirm-nonexistent-file-or-buffer nil)
@@ -6579,7 +6726,8 @@ the unwritable tidbits."
   ;; We should only get here if init was successful. If we do,
   ;; byte-compile this file asynchronously in a subprocess using the
   ;; Radian Makefile. That way, the next startup will be fast(er).
-  (run-with-idle-timer 1 nil #'radian-byte-compile))
+  ;; (run-with-idle-timer 1 nil #'radian-byte-compile)
+  )
 
 ;;; Bootstrap interactive session
 

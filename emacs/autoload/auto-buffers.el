@@ -389,3 +389,62 @@ current project."
        interactive "Killed %d project buffers"
        (- (length buffer-list)
           (length (cl-remove-if-not #'buffer-live-p buffer-list)))))))
+
+;;; Scratch buffers
+;; The idea is based on the `scratch.el' package by Ian Eure:
+;; <https://github.com/ieure/scratch-el>.
+
+;; Adapted from the `scratch.el' package by Ian Eure.
+(defun radian-simple--scratch-list-modes ()
+  "List known major modes."
+  (cl-loop for sym the symbols of obarray
+           for name = (symbol-name sym)
+           when (and (functionp sym)
+                     (not (member sym minor-mode-list))
+                     (string-match "-mode$" name)
+                     (not (string-match "--" name)))
+           collect name))
+
+(defun radian-simple--scratch-buffer-setup (region &optional mode)
+  "Add contents to `scratch' buffer and name it accordingly.
+
+REGION is added to the contents to the new buffer.
+
+Use the current buffer's major mode by default.  With optional
+MODE use that major mode instead."
+  (let* ((major (or mode major-mode))
+         (string (format "Scratch buffer for: %s\n\n" major))
+         (text (concat string region))
+         (buf (format "*Scratch for %s*" major)))
+    (with-current-buffer (get-buffer-create buf)
+      (funcall major)
+	  (save-excursion
+        (insert text)
+        (goto-char (point-min))
+        (comment-region (point-at-bol) (point-at-eol)))
+	  (vertical-motion 2))
+    (pop-to-buffer buf)))
+
+;;;###autoload
+(defun radian-simple-scratch-buffer (&optional arg)
+  "Produce a bespoke scratch buffer matching current major mode.
+
+With ARG as a prefix argument, prompt for a major mode
+with completion.
+
+If region is active, copy its contents to the new scratch
+buffer."
+  (interactive "P")
+  (let* ((modes (radian-simple--scratch-list-modes))
+         (region (with-current-buffer (current-buffer)
+                   (if (region-active-p)
+                       (buffer-substring-no-properties
+                        (region-beginning)
+                        (region-end))
+                     "")))
+         (m))
+    (pcase (prefix-numeric-value arg)
+      (4 (progn
+            (setq m (intern (completing-read "Select major mode: " modes nil t)))
+            (radian-simple--scratch-buffer-setup region m)))
+      (_ (radian-simple--scratch-buffer-setup region)))))

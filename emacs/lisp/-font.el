@@ -67,13 +67,10 @@ font to that size. It's rarely a good idea to do so!")
       (when radian-unicode-font
         (set-fontset-font t 'unicode radian-unicode-font nil 'append))
       (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
-        ;; 汉字Unicode范围
+        ;; Set CJK font.
+        ;; (dolist (script '(kana han cjk-misc bopomofo))
+        ;;   (set-fontset-font (frame-parameter nil 'font) script font))
         (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend))))
-
-  ;; ;; Set CJK font. but upper 'han setting is suffice for me.
-  ;; (dolist (script '(kana han cjk-misc bopomofo))
-  ;;   (set-fontset-font (frame-parameter nil 'font)
-  ;;                     script (font-spec :family "<CJK font name>")))
 
   (apply #'custom-set-faces
          (let ((attrs '(:weight unspecified :slant unspecified :width unspecified)))

@@ -28,7 +28,6 @@
         modus-themes-tabs-accented nil
         modus-themes-variable-pitch-ui nil
         modus-themes-inhibit-reload t ; only applies to `customize-set-variable' and related
-        modus-themes-intense-markup t
 
         modus-themes-fringes nil ; {nil,'subtle,'intense}
 
@@ -46,7 +45,7 @@
         ;; Options for `modus-themes-markup' are either nil, or a list
         ;; that can combine any of `bold', `italic', `background',
         ;; `intense'.
-        modus-themes-markup '(background)
+        modus-themes-markup '(background intense)
 
         ;; Options for `modus-themes-syntax' are either nil (the default),
         ;; or a list of properties that may include any of those symbols:
@@ -69,6 +68,14 @@
         ;; `bold', `italic', `background'
         modus-themes-links '(neutral-underline faint)
 
+        ;; Options for `modus-themes-box-buttons' are either nil (the
+        ;; default), or a list that can combine any of `flat',
+        ;; `accented', `faint', `variable-pitch', `underline', the
+        ;; symbol of any font weight as listed in
+        ;; `modus-themes-weights', and a floating point number
+        ;; (e.g. 0.9) for the height of the button's text.
+        modus-themes-box-buttons '(variable-pitch flat faint 0.9)
+
         ;; Options for `modus-themes-prompts' are either nil (the
         ;; default), or a list of properties that may include any of those
         ;; symbols: `background', `bold', `gray', `intense', `italic'
@@ -76,7 +83,7 @@
 
         modus-themes-completions 'moderate ; {nil,'moderate,'opinionated,'super-opinionated}
 
-        modus-themes-mail-citations nil ; {nil,'intense,'faint,'monochrome}
+        modus-themes-mail-citations 'faint ; {nil,'intense,'faint,'monochrome}
 
         ;; Options for `modus-themes-region' are either nil (the default),
         ;; or a list of properties that may include any of those symbols:
@@ -84,7 +91,7 @@
         modus-themes-region '(no-extend bg-only accented)
 
         ;; Options for `modus-themes-diffs': nil, 'desaturated, 'bg-only
-        modus-themes-diffs nil
+        modus-themes-diffs 'desaturated
 
         modus-themes-org-blocks nil ; {nil,'gray-background,'tinted-background}
 
