@@ -827,10 +827,10 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
 (defalias '-key* 'leaf-key*)
 (defalias '-keys 'leaf-keys)
 (defalias '-keys* 'leaf-keys*)
-(defalias '-mey 'leaf-key-bind-keymap)
-(defalias '-mey* 'leaf-key-bind-keymap*)
-(defalias '-meys 'leaf-keys-bind-keymap)
-(defalias '-meys* 'leaf-keys-bind-keymap*)
+(defalias 'mkey 'leaf-key-bind-keymap)
+(defalias 'mkey* 'leaf-key-bind-keymap*)
+(defalias 'mkeys 'leaf-keys-bind-keymap)
+(defalias 'mkeys* 'leaf-keys-bind-keymap*)
 
 ;; Local Variables:
 ;; indent-tabs-mode: nil

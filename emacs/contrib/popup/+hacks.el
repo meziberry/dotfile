@@ -115,15 +115,6 @@ were followed."
   ;; which can be unpredictable. It should *only* replace the original buffer we
   ;; opened the popup from. To fix this these three button types need to be
   ;; redefined to set aside the popup before following a link.
-  (define-button-type 'help-function-def
-    :supertype 'help-xref
-    'help-function
-    (lambda (fun file)
-      (require 'find-func)
-      (when (eq file 'C-source)
-        (setq file (help-C-file-name (indirect-function fun) 'fun)))
-      (+popup--switch-from-popup (find-function-search-for-symbol fun nil file))))
-
   (define-button-type 'help-variable-def
     :supertype 'help-xref
     'help-function

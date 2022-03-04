@@ -761,6 +761,9 @@ If PKG passed, require PKG before binding."
 
 (pow blackout)
 
+;; REVIEW: let the obsolete warning shutup.
+(advice-add 'with-demoted-errors :around #'fn-quiet!)
+
 ;;;; Meow
 (pow meow
   :straight (meow :repo "meow-edit/meow" :branch "master")
@@ -2161,7 +2164,7 @@ orderless."
     :before #'consult-recent-file
     (recentf-mode +1))
 
-  (setq consult-project-root-function #'radian-project-root
+  (setq consult-project-function #'radian-project-root
         consult-narrow-key "<"
         consult-line-numbers-widen t
         consult-async-min-input 2
@@ -2480,8 +2483,7 @@ Interactively, reverse the characters in the current region."
 ;; Trigger auto-fill after punctutation characters, not just
 ;; whitespace.
 (mapc
- (lambda (c)
-   (set-char-table-range auto-fill-chars c t))
+ (lambda (c) (set-char-table-range auto-fill-chars c t))
  "!-=+]};:'\",.?")
 
 ;; We could maybe use the variable `comment-auto-fill-only-comments'
@@ -2712,7 +2714,6 @@ invocation will kill the newline."
 (-ow warnings
   :require t
   :config
-
   ;; Ignore the warning we get when a huge buffer is reverted and the
   ;; undo information is too large to be recorded.
   (add-to-list 'warning-suppress-log-types '(undo discard-info)))
@@ -2798,14 +2799,12 @@ buffer."
 ;; Package `visual-regexp' provides an alternate version of
 ;; `query-replace' which highlights matches and replacements as you
 ;; type.
-(pow! visual-regexp
-  :bind (([remap query-replace] . vr/query-replace)))
+(pow! visual-regexp :bind (([remap query-replace] . vr/query-replace)))
 
 ;; Package `visual-regexp-steroids' allows `visual-regexp' to use
 ;; regexp engines other than Emacs'; for example, Python or Perl
 ;; regexps.
 (pow! visual-regexp-steroids
-  :require t
   :after visual-regexp
   :bind (([remap query-replace-regexp] . radian-query-replace-literal))
 
@@ -2823,7 +2822,6 @@ buffer."
 
 ;; Package `imenu-list' use the side buffer to display imenu
 (pow! imenu-list
-
   :bind ("C-c i" . imenu-list-smart-toggle)
   :config
   (setq imenu-list-focus-after-activation t)
@@ -2950,11 +2948,9 @@ efficient to remove the `+extra' flag from the :ui ligatures module instead).")
               (not (apply #'derived-mode-p (cdr modes)))
             (apply #'derived-mode-p modes)))))
 
-  :defer-config
-  (defun +ligatures-prettify-symbols-h ()
-    (setq prettify-symbols-alist '(("lambda" . "𝝀"))))
-  (add-hook 'prog-mode-hook #'+ligatures-prettify-symbols-h)
+  (setq prettify-symbols-alist '(("lambda" . "𝝀")))
 
+  :defer-config
   (defun +ligatures-init-buffer-h ()
     "Set up ligatures for the current buffer.
 
@@ -4434,9 +4430,7 @@ Return either a string or nil."
               (when (file-directory-p venv)
                 (cl-return venv)))))))))
 ;; lsp for python
-(pow! lsp-pyright
-  :after python
-  :require t)
+(pow! lsp-pyright :after python :require t)
 
 ;;;; Shell
 ;; http://pubs.opengroup.org/onlinepubs/9699919799/utilities/sh.html
@@ -5537,7 +5531,7 @@ are probably not going to be installed."
 ;; Disable VC. This improves performance and disables some annoying
 ;; warning messages and prompts, especially regarding symlinks. See
 ;; https://stackoverflow.com/a/6190338/3538165.
-(exclude "I USE VC" (-ow! vc-hooks :config (setq vc-handled-backends nil)))
+(exclude "I USE VC" (-ow vc-hooks :config (setq vc-handled-backends nil)))
 
 ;; Feature `smerge-mode' provides an interactive mode for visualizing
 ;; and resolving Git merge conflicts.
@@ -6008,7 +6002,7 @@ Instead, display simply a flat colored region in the fringe."
 (-ow tab-bar
   :init
   (defun +tab-bar-right ()
-    (let* ((p (or (cdr (project-current)) ""))
+    (let* ((p (or (radian-project-root) ""))
            (w (string-width p)))
       (concat
        (propertize
@@ -6051,7 +6045,9 @@ No tab will created if the command is cancelled."
             (tab-bar-new-tab)
             (call-interactively #'project-switch-project)
             (when-let ((proj (project-current)))
-              (tab-bar-rename-tab (format "%s" (file-name-nondirectory (directory-file-name (cdr proj)))))
+              (tab-bar-rename-tab
+               (format "%s" (file-name-nondirectory
+                             (directory-file-name (radian-project-name)))))
               (setq succ t)))
         (unless succ
           (tab-bar-close-tab)))))
@@ -6726,8 +6722,7 @@ the unwritable tidbits."
   ;; We should only get here if init was successful. If we do,
   ;; byte-compile this file asynchronously in a subprocess using the
   ;; Radian Makefile. That way, the next startup will be fast(er).
-  ;; (run-with-idle-timer 1 nil #'radian-byte-compile)
-  )
+  (run-with-idle-timer 1 nil #'radian-byte-compile))
 
 ;;; Bootstrap interactive session
 

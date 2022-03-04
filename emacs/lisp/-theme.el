@@ -40,7 +40,7 @@
         ;; Options for `modus-themes-mode-line' are either nil, or a list
         ;; that can combine any of `3d' OR `moody', `borderless',
         ;; `accented', and a natural number for extra padding
-        modus-themes-mode-line '(moody borderless)
+        modus-themes-mode-line '(3 accented borderless)
 
         ;; Options for `modus-themes-markup' are either nil, or a list
         ;; that can combine any of `bold', `italic', `background',
@@ -81,7 +81,22 @@
         ;; symbols: `background', `bold', `gray', `intense', `italic'
         modus-themes-prompts '(intense bold)
 
-        modus-themes-completions 'moderate ; {nil,'moderate,'opinionated,'super-opinionated}
+        ;; The `modus-themes-completions' is an alist that reads three
+        ;; keys: `matches', `selection', `popup'.  Each accepts a nil
+        ;; value (or empty list) or a list of properties that can include
+        ;; any of the following (for WEIGHT read further below):
+        ;;
+        ;; `key' - `background', `intense', `underline', `italic', WEIGHT
+        ;; `selection' - `accented', `intense', `underline', `italic', WEIGHT
+        ;; `popup' - same as `selected'
+        ;; `t' - applies to any key not explicitly referenced (check docs)
+        ;;
+        ;; WEIGHT is a symbol such as `semibold', `light', or anything
+        ;; covered in `modus-themes-weights'.  Bold is used in the absence
+        ;; of an explicit WEIGHT.
+        modus-themes-completions '((matches . (extrabold))
+                                   (selection . (semibold accented))
+                                   (popup . (accented intense)))
 
         modus-themes-mail-citations 'faint ; {nil,'intense,'faint,'monochrome}
 
@@ -120,8 +135,8 @@
         ;;   (t . (rainbow 1.05)))
         ))
 
+(exclude "prefer modus"
 (-ow nano-theme
-  :disabled t
   :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
   :custom
   (nano-theme-padded-modeline . nil)
@@ -132,7 +147,7 @@
      'ns-system-appearance-change-functions
      (lambda (l?d) (setq nano-theme-light/dark l?d)
        (mapc #'disable-theme custom-enabled-themes)
-       (load-theme 'nano t)))))
+       (load-theme 'nano t))))))
 
 (with-no-warnings
   (defun tinker-theme (theme)
