@@ -198,7 +198,7 @@ dependencies or long-term shared data. Must end with a slash.")
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages
-  '(haskell-mode hl-line ligature)
+  '(haskell-mode ligature)
   "List of packages that Radian should not load.
 If the list starts with `:not', packages that are not part of this
 list are not loaded instead. This variable should be modified in
@@ -397,23 +397,23 @@ hook directly into the init-file during byte-compilation."
 
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
-(if IS-WINDOWS
-    (progn
-      (set-clipboard-coding-system 'utf-16-le)
-      (set-selection-coding-system 'utf-16-le))
-  (set-selection-coding-system 'utf-8)
-  (set-next-selection-coding-system 'utf-8))
-(when (fboundp 'set-charset-priority)
-  (set-charset-priority 'unicode))
-(prefer-coding-system 'utf-8-unix)
-(set-language-environment "UTF-8")
-(set-default-coding-systems 'utf-8-unix)
-(set-terminal-coding-system 'utf-8-unix)
-(set-keyboard-coding-system 'utf-8-unix)
-(setq locale-coding-system 'utf-8-unix)
-;; Treat clipboard input as UTF-8 string first; compound text next, etc.
-(when (display-graphic-p)
-  (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING)))
+(defun init-coding-system-h ()
+  (if IS-WINDOWS
+      (progn
+        (set-clipboard-coding-system 'utf-16-le)
+        (set-selection-coding-system 'utf-16-le))
+    (set-selection-coding-system 'utf-8)
+    (set-next-selection-coding-system 'utf-8))
+  (when (fboundp 'set-charset-priority) (set-charset-priority 'unicode))
+  (prefer-coding-system 'utf-8-unix)
+  (set-language-environment "UTF-8")
+  (set-default-coding-systems 'utf-8-unix)
+  (set-terminal-coding-system 'utf-8-unix)
+  (set-keyboard-coding-system 'utf-8-unix)
+  (setq locale-coding-system 'utf-8-unix)
+  ;; Treat clipboard input as UTF-8 string first; compound text next, etc.
+  (if (display-graphic-p) (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING))))
+(add-hook 'before-init-hook #'init-coding-system-h 'append)
 
 ;; Performance on Windows is considerably worse than elsewhere. We'll need
 ;; everything we can get.
@@ -524,20 +524,20 @@ there is a pending network request."
 ;; REVIEW: if `define-key' called above here, shall lead to "Symbol's
 ;; value as variable is void: \213".
 
-(defvar-keymap radian-comma-keymap
-  :doc "Keymap for Radian commands that should be put under a comma prefix.
- This keymap is bound under \\[radian-comma-keymap]."
-  :prefix 'radian-comma-keymap)
+; :doc "Keymap for Radian commands that should be put under a comma prefix.
+; This keymap is bound under \\[radian-comma-keymap]."
+; :prefix 'radian-comma-keymap
+(define-prefix-command 'radian-comma-keymap 'radian-comma-keymap)
 
-(defvar-keymap radian-zip-keymap
-  :doc "Keymap for Radian commands that should be put under a zip prefix.
- This keymap is bound under \\[radian-zip-keymap]."
-  :prefix 'radian-zip-keymap
-  "z" #'eval-last-sexp)
+; :doc "Keymap for Radian commands that should be put under a zip prefix.
+; This keymap is bound under \\[radian-zip-keymap]."
+; :prefix 'radian-zip-keymap
+(define-prefix-command 'radian-zip-keymap 'radian-zip-keymap)
+(define-key radian-zip-keymap "z" #'eval-last-sexp)
 
-(defvar-keymap radian-keymap
-  :doc "Keymap for Radian commands that should be put under a prefix.
-This keymap is bound under \\[radian-keymap].")
+(defvar radian-keymap (make-sparse-keymap))
+;  :doc "Keymap for Radian commands that should be put under a prefix.
+;This keymap is bound under \\[radian-keymap].")
 
 (define-key global-map "\M-P" radian-keymap)
 
@@ -1440,17 +1440,10 @@ all hooks after it are ignored.")
   "Run `radian-escape-hook'."
   (interactive (list 'interactive))
   (cond ((switch-to-buffer (window-buffer (active-minibuffer-window)))
-         ;; quit the minibuffer if open.
-         (cond
-          ((featurep 'delsel)
-           (progn
-             (eval-when-compile (require 'delsel))
-             (minibuffer-keyboard-quit)))
-          ;; Emacs 28 and later
-          ((fboundp 'abort-minibuffers)
-           (abort-minibuffers))
-          ;; Emacs 27 and earlier
-          (t (abort-recursive-edit))))
+         ;; Emacs 27 and earlier
+         (abort-recursive-edit)
+         ;; Quit the minibuffer if open.
+         (minibuffer-keyboard-quit))
         ;; Run all escape hooks. If any returns non-nil, then stop there.
         ((run-hook-with-args-until-success 'radian-escape-hook))
         ;; don't abort macros
@@ -2022,8 +2015,53 @@ Return nil when horizontal scrolling has moved it off screen."
   (setq ibuffer-saved-filter-groups nil)
   (setq ibuffer-old-time 48))
 
-;;;; HEAD-CORE 
+;; Feature `whitespace' provides a minor mode for highlighting
+;; whitespace in various special ways.
+;;;; Whitespace
+(-ow whitespace
+  :init
+  (defun radian-highlight-non-default-indentation-h ()
+    "Highlight whitespace at odds with `indent-tabs-mode'.
+That is, highlight tabs if `indent-tabs-mode' is `nil', and highlight spaces at
+the beginnings of lines if `indent-tabs-mode' is `t'. The purpose is to make
+incorrect indentation in the current buffer obvious to you.
 
+Does nothing if `whitespace-mode' or `global-whitespace-mode' is already active
+or if the current buffer is read-only or not file-visiting."
+    (unless (or (eq major-mode 'fundamental-mode)
+                (bound-and-true-p global-whitespace-mode)
+                (null buffer-file-name))
+      (require 'whitespace)
+      (set (make-local-variable 'whitespace-style)
+           (cl-union (if indent-tabs-mode
+                         '(indentation)
+                       '(tabs tab-mark))
+                     (when whitespace-mode
+                       (remq 'face whitespace-active-style))))
+      (cl-pushnew 'face whitespace-style) ; must be first
+      (whitespace-mode +1)))
+
+  (define-minor-mode radian-highlight-long-lines-mode
+    "Minor mode for highlighting long lines."
+    :after-hook
+    (if radian-highlight-long-lines-mode
+        (progn
+          (setq-local whitespace-style '(face lines-tail))
+          (setq-local whitespace-line-column 79)
+          (whitespace-mode +1))
+      (whitespace-mode -1)
+      (kill-local-variable 'whitespace-style)
+      (kill-local-variable 'whitespace-line-column)))
+
+  (add-hook 'prog-mode-hook #'radian-highlight-long-lines-mode)
+  (defun toggle-radian-highlight-long-lines-mode ()
+    (if radian-highlight-long-lines-mode
+        (radian-highlight-long-lines-mode -1)
+      (radian-highlight-long-lines-mode +1)))
+  (add-hook! '(ediff-prepare-buffer-hook ediff-quit-hook) #'toggle-radian-highlight-long-lines-mode)
+  :blackout t)
+
+;;;; HEAD-CORE 
 ;;; MODULE {Vertico}
 
 (defadvice! radian--advice-eval-expression-save-garbage
@@ -2578,52 +2616,6 @@ newline."
 (radian-fix-whitespace-global-mode +1)
 
 (put 'radian-fix-whitespace-mode 'safe-local-variable #'booleanp)
-
-;; Feature `whitespace' provides a minor mode for highlighting
-;; whitespace in various special ways.
-;;;; Whitespace
-(-ow whitespace
-  :init
-  (defun radian-highlight-non-default-indentation-h ()
-    "Highlight whitespace at odds with `indent-tabs-mode'.
-That is, highlight tabs if `indent-tabs-mode' is `nil', and highlight spaces at
-the beginnings of lines if `indent-tabs-mode' is `t'. The purpose is to make
-incorrect indentation in the current buffer obvious to you.
-
-Does nothing if `whitespace-mode' or `global-whitespace-mode' is already active
-or if the current buffer is read-only or not file-visiting."
-    (unless (or (eq major-mode 'fundamental-mode)
-                (bound-and-true-p global-whitespace-mode)
-                (null buffer-file-name))
-      (require 'whitespace)
-      (set (make-local-variable 'whitespace-style)
-           (cl-union (if indent-tabs-mode
-                         '(indentation)
-                       '(tabs tab-mark))
-                     (when whitespace-mode
-                       (remq 'face whitespace-active-style))))
-      (cl-pushnew 'face whitespace-style) ; must be first
-      (whitespace-mode +1)))
-
-  (define-minor-mode radian-highlight-long-lines-mode
-    "Minor mode for highlighting long lines."
-    :after-hook
-    (if radian-highlight-long-lines-mode
-        (progn
-          (setq-local whitespace-style '(face lines-tail))
-          (setq-local whitespace-line-column 79)
-          (whitespace-mode +1))
-      (whitespace-mode -1)
-      (kill-local-variable 'whitespace-style)
-      (kill-local-variable 'whitespace-line-column)))
-
-  (add-hook 'prog-mode-hook #'radian-highlight-long-lines-mode)
-  (defun toggle-radian-highlight-long-lines-mode ()
-    (if radian-highlight-long-lines-mode
-        (radian-highlight-long-lines-mode -1)
-      (radian-highlight-long-lines-mode +1)))
-  (add-hook! '(ediff-prepare-buffer-hook ediff-quit-hook) #'toggle-radian-highlight-long-lines-mode)
-  :blackout t)
 
 ;; Feature `outline' provides major and minor modes for collapsing
 ;; sections of a buffer into an outline-like format.
@@ -4037,7 +4029,7 @@ was printed, and only have ElDoc display if one wasn't."
     ("tT" . sly-toggle-fancy-trace)
     ("tu" . sly-untrace-all))))
 
-(pow! sly-repl-ansi-color :init (add-to-list 'sly-contribs 'sly-repl-ansi-color))
+(pow! sly-repl-ansi-color :defer-config (add-to-list 'sly-contribs 'sly-repl-ansi-color))
 (pow! sly-macrostep :commands macrostep-expand)
 
 ;;;; Dart
@@ -4445,13 +4437,15 @@ Return either a string or nil."
     (advice-add func :around #'fn-quiet!))
 
   (add-hook! 'sh-mode-hook
-    (defun radian--sh-prettify-mode-line ()
+    (defun radian--sh-prettify-mode-line (&rest _)
       "Instead of \"Shell[bash]\", display mode name as \"Bash\"."
       ;; Only do this for `sh-mode', not derived modes such as
       ;; `pkgbuild-mode'.
       (setq mode-line-process nil)
       (when (eq major-mode 'sh-mode)
-        (setq mode-name (capitalize (symbol-name sh-shell)))))))
+        (setq mode-name (capitalize (symbol-name sh-shell))))))
+
+  (advice-add 'sh-set-shell :after #'radian--sh-prettify-mode-line))
 
 ;;;; Web
 ;; https://developer.mozilla.org/en-US/docs/web/HTML
@@ -4677,7 +4671,7 @@ This function calls `json-mode--update-auto-mode' to change the
   (interactive)
   (let ((default-directory *radian-lisp/*))
     (call-interactively #'find-file)))
-(-key "f" #'open-radian-file radian-zip-keymap)
+(-key "f" #'open-radian-file 'radian-zip-keymap)
 
 ;;;; Help
 
@@ -5409,7 +5403,21 @@ non-nil value to enable trashing for file operations."
   (osx-trash-setup))
 
 ;;;;; Dired
-(pow! dirvish :hook (radian-first-file-hook . dirvish-override-dired-mode))
+(pow! dirvish
+  :hook (radian-first-file-hook . dirvish-override-dired-mode)
+  :custom (dirvish-attributes . '(vscode-icon file-size))
+  :bind
+  (dired-mode-map
+   ("SPC" . dirvish-show-history)
+   ("r"   . dirvish-roam)
+   ("b"   . dirvish-goto-bookmark)
+   ("f"   . dirvish-file-info-menu)
+   ("M-a" . dirvish-mark-actions-menu)
+   ("M-s" . dirvish-setup-menu)
+   ("M-f" . dirvish-toggle-fullscreen)
+   ([remap dired-summary] . dirvish-dispatch)
+   ([remap dired-do-copy] . dirvish-yank)
+   ([remap mode-line-other-buffer] . dirvish-other-buffer)))
 
 ;; Dired has some trouble parsing out filenames that have e.g. leading
 ;; spaces, unless the ls program used has support for Dired. GNU ls
@@ -5996,7 +6004,9 @@ Instead, display simply a flat colored region in the fringe."
 
 ;;; MODULE {Appearance}
 ;;;; pixel-scroll
-(-ow pixel-scroll :emacs> 29 :init (pixel-scroll-precision-mode +1))
+(-ow pixel-scroll
+  :defun pixel-scroll-precision-mode
+  :emacs> 29 :init (pixel-scroll-precision-mode +1))
 
 ;;;; tab-bar
 (-ow tab-bar
@@ -6074,49 +6084,6 @@ No tab will created if the command is cancelled."
   (after! helpful (define-key helpful-mode-map "o" #'link-hint-open-link))
   (eval-after-load 'apropos '(define-key apropos-mode-map "o" #'link-hint-open-link))
   (eval-after-load 'info '(define-key Info-mode-map "o" #'link-hint-open-link)))
-
-;;;; hl-line
-(-ow! hl-line
-  ;; Highlights the current line
-  :hook (radian-first-buffer-hook . global-hl-line-mode)
-  :init
-  (defvar global-hl-line-modes
-    '(prog-mode text-mode conf-mode special-mode
-                org-agenda-mode)
-    "What modes to enable `hl-line-mode' in.")
-  :config
-  ;; HACK I reimplement `global-hl-line-mode' so we can white/blacklist modes in
-  ;;      `global-hl-line-modes' _and_ so we can use `global-hl-line-mode',
-  ;;      which users expect to control hl-line in Emacs.
-  (define-globalized-minor-mode global-hl-line-mode hl-line-mode
-    (lambda ()
-      (and (cond (hl-line-mode nil)
-                 ((null global-hl-line-modes) nil)
-                 ((eq global-hl-line-modes t))
-                 ((eq (car global-hl-line-modes) 'not)
-                  (not (derived-mode-p global-hl-line-modes)))
-                 ((apply #'derived-mode-p global-hl-line-modes)))
-           (hl-line-mode +1))))
-
-  ;; Temporarily disable `hl-line' when selection is active, since it doesn't
-  ;; serve much purpose when the selection is so much more visible.
-  (defvar radian--hl-line-mode nil)
-
-  (add-hook! 'hl-line-mode-hook
-    (defun radian-truly-disable-hl-line-h ()
-      (unless hl-line-mode
-        (setq-local radian--hl-line-mode nil))))
-
-  (add-hook! 'activate-mark-hook
-    (defun radian-disable-hl-line-h ()
-      (when hl-line-mode
-        (hl-line-mode -1)
-        (setq-local radian--hl-line-mode t))))
-
-  (add-hook! 'deactivate-mark-hook
-    (defun radian-enable-hl-line-maybe-h ()
-      (when radian--hl-line-mode
-        (hl-line-mode +1)))))
 
 ;;;; pulse.el
 (-ow! pulse
@@ -6362,13 +6329,13 @@ spaces."
     (cond
      ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
       (setf (nth index mode-line-modes) ""))
-     ((equal "(" e) (setf (nth index mode-line-modes) "⟿"))
+     ((equal "(" e) (setf (nth index mode-line-modes) "⟿")) ;
      ((equal ")" e) (setf (nth index mode-line-modes) ""))
      (t))
     (setq index (1+ index))))
 
 (defcustom radian-mode-line-left
-  '(" "
+  '(""
     mode-line-mule-info
     "%*" "%@"
     "  "

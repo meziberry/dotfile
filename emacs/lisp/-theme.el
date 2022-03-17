@@ -40,7 +40,7 @@
         ;; Options for `modus-themes-mode-line' are either nil, or a list
         ;; that can combine any of `3d' OR `moody', `borderless',
         ;; `accented', and a natural number for extra padding
-        modus-themes-mode-line '(3 accented borderless)
+        modus-themes-mode-line '(2 accented borderless)
 
         ;; Options for `modus-themes-markup' are either nil, or a list
         ;; that can combine any of `bold', `italic', `background',
@@ -123,17 +123,7 @@
           (3 . (variable-pitch regular 1.07))
           (4 . (monochrome 1.04))
           (5 . (1))
-          (t . (rainbow 1)))
-
-        ;; ;; For example:
-        ;; modus-themes-headings
-        ;; '((1 . (variable-pitch light 1.8))
-        ;;   (2 . (variable-pitch regular 1.6))
-        ;;   (3 . (variable-pitch regular 1.3))
-        ;;   (4 . (monochrome 1.2))
-        ;;   (5 . (1.1))
-        ;;   (t . (rainbow 1.05)))
-        ))
+          (t . (rainbow 1)))))
 
 (exclude "prefer modus"
 (-ow nano-theme

@@ -14,10 +14,7 @@ Returns nil if not in a project."
          (d (or dir (file-name-directory (or f ""))))
          (pr (project-current maybe-prompt d)))
     (if pr (directory-file-name
-            (cond
-             ((eq 'vc (car pr))
-              (nth 2 pr))
-             (t (cdr pr)))))))
+            (if (eq 'vc (car pr)) (nth 2 pr) (cdr pr))))))
 
 ;;;###autoload
 (defun radian-project-name (&optional dir)
