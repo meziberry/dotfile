@@ -17,13 +17,13 @@
     (throw 'stale-bytecode nil)))
 
 ;;; Comp
-(defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
+(defconst *NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
 
 ;; ;; Custom eln directory
 ;; (if (fboundp 'startup-redirect-eln-cache) (startup-redirect-eln-cache "cache/eln"))
 
 (and
- IS-NATIVECOMP
+ *NATIVECOMP
  (with-eval-after-load 'comp
    ;; NOTE: Some variable is defined in `init.el', load it when
    ;; native-comp-async. `defalias' will cause `native--compile-async'
@@ -39,12 +39,12 @@
 ;;; Radian Variables/Hooks
 (defvar radian--current-feature 'core "The feature loading")
 
-(defconst IS-EMACS29+   (> emacs-major-version 28))
-(defconst IS-EMACS28+   (> emacs-major-version 27))
-(defconst IS-MAC        (eq system-type 'darwin))
-(defconst IS-LINUX      (eq system-type 'gnu/linux))
-(defconst IS-WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
-(defconst IS-BSD        (or IS-MAC (eq system-type 'berkeley-unix)))
+(defconst *EMACS29+   (> emacs-major-version 28))
+(defconst *EMACS28+   (> emacs-major-version 27))
+(defconst *MAC        (eq system-type 'darwin))
+(defconst *LINUX      (eq system-type 'gnu/linux))
+(defconst *WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
+(defconst *BSD        (or *MAC (eq system-type 'berkeley-unix)))
 
 (defvar radian-debug-p (or (getenv-internal "DEBUG") init-file-debug)
   "If non-nil, Radian will log more.
@@ -392,13 +392,13 @@ hook directly into the init-file during byte-compilation."
 
 ;; Remove command line options that aren't relevant to our current OS; means
 ;; slightly less to process at startup.
-(unless IS-MAC   (setq command-line-ns-option-alist nil))
-(unless IS-LINUX (setq command-line-x-option-alist nil))
+(unless *MAC   (setq command-line-ns-option-alist nil))
+(unless *LINUX (setq command-line-x-option-alist nil))
 
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
 (defun init-coding-system-h ()
-  (if IS-WINDOWS
+  (if *WINDOWS
       (progn
         (set-clipboard-coding-system 'utf-16-le)
         (set-selection-coding-system 'utf-16-le))
@@ -488,7 +488,7 @@ hook directly into the init-file during byte-compilation."
       gnutls-algorithm-priority
       (when (boundp 'libgnutls-version)
         (concat "SECURE128:+SECURE192:-VERS-ALL"
-                (if (and (not IS-WINDOWS)
+                (if (and (not *WINDOWS)
                          (>= libgnutls-version 30605))
                     ":+VERS-TLS1.3")
                 ":+VERS-TLS1.2"))
@@ -1357,14 +1357,14 @@ unquote it using a comma."
 (-keys ((radian-comma-keymap ("tf" . radian/toggle-profiler))))
 
 (eval-cond!
-  (IS-MAC
+  (*MAC
    ;; mac-* variables are used by the special emacs-mac build of Emacs by
    ;; Yamamoto Mitsuharu, while other builds use ns-*.
    (setq mac-command-modifier      'super
          mac-option-modifier       'meta
          ;; Free up the right option for character composition
          mac-right-option-modifier 'none))
-  (IS-WINDOWS
+  (*WINDOWS
    (setq w32-lwindow-modifier 'super
          w32-rwindow-modifier 'super)))
 
@@ -1513,7 +1513,7 @@ all hooks after it are ignored.")
 (add-hook 'tty-setup-hook #'xterm-mouse-mode)
 
 ;; Windows terminals don't support what I'm about to do, but best not to wrap
-;; this in a IS-WINDOWS check, in case you're using WSL or Cygwin, which do and
+;; this in a *WINDOWS check, in case you're using WSL or Cygwin, which do and
 ;; *might* support it.
 (pow! clipetty :hook (tty-setup-hook . global-clipetty-mode) :blackout t)
 
@@ -1521,7 +1521,7 @@ all hooks after it are ignored.")
 
 ;; Unix tools look for HOME, but this is normally not defined on Windows.
 (when-let (realhome
-           (and IS-WINDOWS
+           (and *WINDOWS
                 (null (getenv-internal "HOME"))
                 (getenv "USERPROFILE")))
   (setenv "HOME" realhome)
@@ -1594,7 +1594,7 @@ startup.")
 ;;
 ;; [1]: https://gist.github.com/the-kenny/267162
 ;; [2]: https://emacs.stackexchange.com/q/26471/12534
-(when IS-MAC
+(when *MAC
   (unless (display-graphic-p)
 
     (defvar radian--clipboard-last-copy nil
@@ -1797,72 +1797,6 @@ active minibuffer, even if the minibuffer is not selected."
           :files ("*.el" "autoload/*.el")
           :build (:not compile))
   :require t)
-
-;; (pow! shackle
-;;   :hook (radian-first-buffer-hook . shackle-mode)
-;;   :init
-;;   ;; This function is derived from split-window-sensibly
-;;   (defun shackle-align (&optional window)
-;;     (let ((window (or window (selected-window))))
-;;       (or (and (window-splittable-p window t) 'right)
-;;           (and (window-splittable-p window) 'below)
-;;           (and
-;;            ;; If WINDOW is the only usable window on its frame (it is
-;;            ;; the only one or, not being the only one, all the other
-;;            ;; ones are dedicated) and is not the minibuffer window, try
-;;            ;; to split it vertically disregarding the value of
-;;            ;; `split-height-threshold'.
-;;            (let ((frame (window-frame window)))
-;;              (or (eq window (frame-root-window frame))
-;;                  (catch 'done
-;;                    (walk-window-tree
-;;                     (lambda (w) (unless (or (eq w window) (window-dedicated-p w))
-;;                                   (throw 'done nil)))
-;;                     frame)
-;;                    t)))
-;;            (not (window-minibuffer-p window))
-;;            (let ((split-height-threshold 0))
-;;              (when (window-splittable-p window) 'below))))))
-;;   :setq
-;;   (shackle-rules
-;;    .
-;;    '((compilation-mode :select nil)
-;;      ("*help.*" :regexp t :modeline nil :other t :select nil :same nil :align shackle-align :size 0.5)))
-;;   :config/el-patch
-;;   (defun shackle--display-buffer (buffer alist plist)
-;;     "Internal function for `shackle-display-buffer'.
-;; Displays BUFFER according to ALIST and PLIST."
-;;     ;; HACK: Add the :modeline keyword for shackle-rules.
-;;     (unless (plist-get plist :modeline)
-;;       (push
-;;        `(window-parameters
-;;          .
-;;          ,(append (alist-get 'window-parameters alist) '((mode-line-format . none))))
-;;        alist))
-;;     (cond
-;;      ((plist-get plist :custom)
-;;       (let* ((action (plist-get plist :custom))
-;;              (window (funcall action buffer alist plist)))
-;;         (when (and window (not (windowp window)))
-;;           (user-error "Custom action didn't return window: %S %S" window action))
-;;         window))
-;;      ((plist-get plist :ignore) 'fail)
-;;      ((shackle--display-buffer-reuse buffer alist))
-;;      ((or (plist-get plist :same)
-;;           ;; there is `display-buffer--same-window-action' which things
-;;           ;; like `info' use to reuse the currently selected window, it
-;;           ;; happens to be of the (inhibit-same-window . nil) form and
-;;           ;; should be permitted unless a popup is requested
-;;           (and (not (plist-get plist :popup))
-;;                (and (assq 'inhibit-same-window alist)
-;;                     (not (cdr (assq 'inhibit-same-window alist))))))
-;;       (shackle--display-buffer-same buffer alist))
-;;      ((plist-get plist :frame)
-;;       (funcall shackle-display-buffer-frame-function buffer alist plist))
-;;      ((plist-get plist :align)
-;;       (shackle--display-buffer-aligned-window buffer alist plist))
-;;      (t
-;;       (shackle--display-buffer-popup-window buffer alist plist)))))
 
 ;; Package `swsw' provides lightway to navigate windows.
 (-ow swsw
@@ -2214,7 +2148,7 @@ orderless."
         (if radian--fd-binary
             (format "%s --color=never -i -H -E .git --regex %s"
                     radian--fd-binary
-                    (if IS-WINDOWS "--path-separator=/" ""))
+                    (if *WINDOWS "--path-separator=/" ""))
           consult-find-args))
 
   (consult-customize
@@ -2320,6 +2254,16 @@ completing-read prompter."
         isearch-repeat-on-direction-change t
         isearch-motion-changes-direction t)
 
+  :blackout t)
+
+;;;; Highlight symbols
+(pow! symbol-overlay
+  :hook
+  ((prog-mode-hook html-mode-hook yaml-mode-hook conf-mode-hook) . symbol-overlay-mode)
+  :config
+  (meow-normal-define-key `("*" . ,(cmd! (or (meow-expand-0) (symbol-overlay-put)))))
+  (define-key symbol-overlay-mode-map (kbd "M-i") 'symbol-overlay-put)
+  (define-key symbol-overlay-mode-map (kbd "M-I") 'symbol-overlay-remove-all)
   :blackout t)
 
 ;;; MODULE {files}
@@ -2854,7 +2798,7 @@ buffer."
 ;;;; tramp
 (-ow tramp
   :init
-  (unless IS-WINDOWS
+  (unless *WINDOWS
     (setq tramp-default-method "ssh")) ; faster than the default scp
   :defer-config
   (setq remote-file-name-inhibit-cache 60
@@ -2871,7 +2815,7 @@ buffer."
   ;; Emacs 29 introduced faster long-line detection, so they can afford a much
   ;; larger `so-long-threshold' and its default `so-long-predicate'.
   (if (fboundp 'buffer-line-statistics)
-      (unless IS-NATIVECOMP (setq so-long-threshold 5000))
+      (unless *NATIVECOMP (setq so-long-threshold 5000))
     ;; reduce false positives w/ larger threshold
     (setq so-long-threshold 400)
 
@@ -2967,7 +2911,7 @@ and cannot run in."
 
 ;;;; ligature
 (-ow! ligature
-  :unless IS-WINDOWS          ; `ligature' make emacs slow on windows.
+  :unless *WINDOWS          ; `ligature' make emacs slow on windows.
   :straight (ligature :host github :repo "mickeynp/ligature.el")
 
   :config
@@ -4060,7 +4004,7 @@ was printed, and only have ElDoc display if one wasn't."
   :straight treemacs
   :when (featurep! 'lsp-mode)
   :config
-  (if IS-WINDOWS
+  (if *WINDOWS
       (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
             lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")))
 (pow! flutter :bind (dart-mode-map ("r" . flutter-run-or-hot-reload)))
@@ -5383,7 +5327,7 @@ In case of failure, fail gracefully."
 ;; Package `osx-trash' provides functionality that allows Emacs to
 ;; place files in the trash on macOS.
 (pow osx-trash
-  :disabled (not (and IS-MAC (featurep! osx-trash)))
+  :disabled (not (and *MAC (featurep! osx-trash)))
   :commands (osx-trash-move-file-to-trash)
   :init
 
@@ -5404,11 +5348,13 @@ non-nil value to enable trashing for file operations."
 
 ;;;;; Dired
 (pow! dirvish
+  :increment t
   :hook (radian-first-file-hook . dirvish-override-dired-mode)
-  :custom (dirvish-attributes . '(vscode-icon file-size))
+  :custom (dirvish-async-listing-threshold . 10000)
+  :setq (dirvish--debouncing-delay . 1)
   :bind
   (dired-mode-map
-   ("SPC" . dirvish-show-history)
+   ("l"   . dirvish-show-history)
    ("r"   . dirvish-roam)
    ("b"   . dirvish-goto-bookmark)
    ("f"   . dirvish-file-info-menu)
@@ -5508,7 +5454,7 @@ the problematic case.)"
   ;; Prevent annoying "Omitted N lines" messages when auto-reverting.
   (setq dired-omit-verbose nil)
 
-  (when IS-MAC
+  (when *MAC
     (defadvice! radian--advice-dired-guess-open-on-macos
       (&rest _)
       "Cause Dired's '!' command to use open(1).
@@ -6202,7 +6148,7 @@ No tab will created if the command is cancelled."
     (scroll-bar-mode -1))
   (tool-bar-mode -1)
 
-  (eval-when! IS-MAC
+  (eval-when! *MAC
     (add-hook! 'after-make-frame-functions
       (defun radian--disable-menu-bar-again-on-macos (_)
         "Disable the menu bar again, because macOS is dumb.
@@ -6223,7 +6169,7 @@ turn it off again after creating the first frame."
   (setq x-stretch-cursor nil)
 
   ;; On macOS, set the title bar to match the frame background.
-  (when IS-MAC
+  (when *MAC
     (add-to-list 'default-frame-alist '(ns-appearance . dark))
     (add-to-list 'default-frame-alist '(ns-transparent-titlebar . t))))
 
@@ -6284,7 +6230,7 @@ turn it off again after creating the first frame."
 ;; its promtps are governed by the same rules and keybinds as the rest of Emacs.
 (setq use-dialog-box nil)
 (when (bound-and-true-p tooltip-mode) (tooltip-mode -1))
-(eval-when! IS-LINUX (setq x-gtk-use-system-tooltips nil))
+(eval-when! *LINUX (setq x-gtk-use-system-tooltips nil))
 
 ;; Expand the minibuffer to fit multi-line text displayed in the echo-area. This
 ;; doesn't look too great with direnv, however...
@@ -6494,7 +6440,7 @@ bound dynamically before being used.")
 
 ;;; Miscellaneous
 ;; Dos2unix on emacs-lisp-mode
-(when IS-WINDOWS
+(when *WINDOWS
   (defun save-buffer-as-unix (&rest _)
     (if (eq major-mode 'emacs-lisp-mode) (radian/dos2unix)))
   (add-hook 'before-save-hook #'save-buffer-as-unix))

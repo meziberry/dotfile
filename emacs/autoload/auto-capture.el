@@ -15,9 +15,9 @@
     (width . 70)
     (height . 25)
     (transient . t)
-    ,(when (and IS-LINUX (not (getenv "DISPLAY")))
+    ,(when (and *LINUX (not (getenv "DISPLAY")))
        `(display . ":0"))
-    ,(if IS-MAC '(menu-bar-lines . 1)))
+    ,(if *MAC '(menu-bar-lines . 1)))
   "TODO")
 
 ;;;###autoload

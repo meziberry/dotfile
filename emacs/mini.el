@@ -37,10 +37,10 @@ init-file is loaded, not just once.")
 
 
 ;;; Comp
-(defconst IS-NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
+(defconst *NATIVECOMP (if (fboundp 'native-comp-available-p) (native-comp-available-p)))
 
 (and
- IS-NATIVECOMP
+ *NATIVECOMP
  (with-eval-after-load 'comp
    ;; NOTE: Some variable is defined in `init.el', load it when
    ;; native-comp-async. `defalias' will cause `native--compile-async'
@@ -56,12 +56,12 @@ init-file is loaded, not just once.")
 ;;; Radian Variables/Hooks
 (defvar radian--current-feature 'core "The feature loading")
 
-(defconst IS-EMACS29+   (> emacs-major-version 28))
-(defconst IS-EMACS28+   (> emacs-major-version 27))
-(defconst IS-MAC        (eq system-type 'darwin))
-(defconst IS-LINUX      (eq system-type 'gnu/linux))
-(defconst IS-WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
-(defconst IS-BSD        (or IS-MAC (eq system-type 'berkeley-unix)))
+(defconst *EMACS29+   (> emacs-major-version 28))
+(defconst *EMACS28+   (> emacs-major-version 27))
+(defconst *MAC        (eq system-type 'darwin))
+(defconst *LINUX      (eq system-type 'gnu/linux))
+(defconst *WINDOWS    (memq system-type ' (cygwin windows-nt ms-dos)))
+(defconst *BSD        (or *MAC (eq system-type 'berkeley-unix)))
 
 (defvar radian-debug-p (or (getenv-internal "DEBUG") init-file-debug)
   "If non-nil, Radian will log more.
@@ -1114,12 +1114,12 @@ Features should be disabled in `radian-before-straight-hook'."
 
 ;; Remove command line options that aren't relevant to our current OS; means
 ;; slightly less to process at startup.
-(unless IS-MAC   (setq command-line-ns-option-alist nil))
-(unless IS-LINUX (setq command-line-x-option-alist nil))
+(unless *MAC   (setq command-line-ns-option-alist nil))
+(unless *LINUX (setq command-line-x-option-alist nil))
 
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
-(if IS-WINDOWS
+(if *WINDOWS
     (progn
       (set-clipboard-coding-system 'utf-16-le)
       (set-selection-coding-system 'utf-16-le))
@@ -1210,7 +1210,7 @@ Features should be disabled in `radian-before-straight-hook'."
       gnutls-algorithm-priority
       (when (boundp 'libgnutls-version)
         (concat "SECURE128:+SECURE192:-VERS-ALL"
-                (if (and (not IS-WINDOWS)
+                (if (and (not *WINDOWS)
                          (>= libgnutls-version 30605))
                     ":+VERS-TLS1.3")
                 ":+VERS-TLS1.2"))
@@ -1943,14 +1943,14 @@ This is a function for `after-save-hook'. Remove
       (apply func args))))
 
 (eval-cond!
-  (IS-MAC
+  (*MAC
    ;; mac-* variables are used by the special emacs-mac build of Emacs by
    ;; Yamamoto Mitsuharu, while other builds use ns-*.
    (setq mac-command-modifier      'super
          mac-option-modifier       'meta
          ;; Free up the right option for character composition
          mac-right-option-modifier 'none))
-  (IS-WINDOWS
+  (*WINDOWS
    (setq w32-lwindow-modifier 'super
          w32-rwindow-modifier 'super)))
 
@@ -2037,7 +2037,7 @@ all hooks after it are ignored.")
 
 ;; Unix tools look for HOME, but this is normally not defined on Windows.
 (when-let (realhome
-           (and IS-WINDOWS
+           (and *WINDOWS
                 (null (getenv-internal "HOME"))
                 (getenv "USERPROFILE")))
   (setenv "HOME" realhome)
@@ -2110,7 +2110,7 @@ startup.")
 ;;
 ;; [1]: https://gist.github.com/the-kenny/267162
 ;; [2]: https://emacs.stackexchange.com/q/26471/12534
-(when IS-MAC
+(when *MAC
   (unless (display-graphic-p)
 
     (defvar radian--clipboard-last-copy nil
@@ -2961,7 +2961,7 @@ invocation will kill the newline."
 ;;;; tramp
 (-ow tramp
   :init
-  (unless IS-WINDOWS
+  (unless *WINDOWS
     (setq tramp-default-method "ssh")) ; faster than the default scp
   :defer-config
   (setq remote-file-name-inhibit-cache 60
@@ -2978,7 +2978,7 @@ invocation will kill the newline."
   ;; Emacs 29 introduced faster long-line detection, so they can afford a much
   ;; larger `so-long-threshold' and its default `so-long-predicate'.
   (if (fboundp 'buffer-line-statistics)
-      (unless IS-NATIVECOMP (setq so-long-threshold 5000))
+      (unless *NATIVECOMP (setq so-long-threshold 5000))
     ;; reduce false positives w/ larger threshold
     (setq so-long-threshold 400)
 
@@ -3444,7 +3444,7 @@ the problematic case.)"
   ;; Prevent annoying "Omitted N lines" messages when auto-reverting.
   (setq dired-omit-verbose nil)
 
-  (when IS-MAC
+  (when *MAC
     (defadvice! radian--advice-dired-guess-open-on-macos
       (&rest _)
       "Cause Dired's '!' command to use open(1).
@@ -3499,7 +3499,7 @@ are probably not going to be installed."
     (scroll-bar-mode -1))
   (tool-bar-mode -1)
 
-  (eval-when! IS-MAC
+  (eval-when! *MAC
     (add-hook! 'after-make-frame-functions
       (defun radian--disable-menu-bar-again-on-macos (_)
         "Disable the menu bar again, because macOS is dumb.
@@ -3520,7 +3520,7 @@ turn it off again after creating the first frame."
   (setq x-stretch-cursor nil)
 
   ;; On macOS, set the title bar to match the frame background.
-  (when IS-MAC
+  (when *MAC
     (add-to-list 'default-frame-alist '(ns-appearance . dark))
     (add-to-list 'default-frame-alist '(ns-transparent-titlebar . t))))
 
@@ -3581,7 +3581,7 @@ turn it off again after creating the first frame."
 ;; its promtps are governed by the same rules and keybinds as the rest of Emacs.
 (setq use-dialog-box nil)
 (when (bound-and-true-p tooltip-mode) (tooltip-mode -1))
-(eval-when! IS-LINUX (setq x-gtk-use-system-tooltips nil))
+(eval-when! *LINUX (setq x-gtk-use-system-tooltips nil))
 
 ;; Expand the minibuffer to fit multi-line text displayed in the echo-area. This
 ;; doesn't look too great with direnv, however...
@@ -3786,7 +3786,7 @@ bound dynamically before being used.")
   (interactive)
   (set-buffer-file-coding-system 'undecided-dos nil))
 
-(when IS-WINDOWS
+(when *WINDOWS
   (defun save-buffer-as-unix (&rest _)
     (if (eq major-mode 'emacs-lisp-mode) (radian/dos2unix)))
   (add-hook 'before-save-hook #'save-buffer-as-unix))
@@ -4017,7 +4017,7 @@ font to that size. It's rarely a good idea to do so!")
       (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
         (set-fontset-font t 'symbol font))
       (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
-        (eval-when! IS-EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
+        (eval-when! *EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
       (when radian-unicode-font
         (set-fontset-font t 'unicode radian-unicode-font nil 'append))
       (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
@@ -4060,7 +4060,7 @@ font to that size. It's rarely a good idea to do so!")
   :group 'radian)
 
 (defvar radian-theme-list '((modus-operandi . 'light) (modus-vivendi . 'dark))
-  "Theme sequence of changing. `(THEME-NAME . IS-LIGHT-THEME)'")
+  "Theme sequence of changing. `(THEME-NAME . *LIGHT-THEME)'")
 
 (defun --l?d (light dark)
   "Determine using the LIGHT or the DARK color of theme."

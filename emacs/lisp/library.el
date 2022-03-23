@@ -147,9 +147,8 @@ at the values with which this function was called."
   "Lexically bind ENVVARS in BODY, like `let' but for `process-environment'."
   (declare (indent 1))
   `(let ((process-environment (copy-sequence process-environment)))
-     (dolist (var (list ,@(cl-loop for (var val) in envvars
-                                   collect `(cons ,var ,val))))
-       (setenv (car var) (cdr var)))
+     ,@(cl-loop for (var val) in envvars
+                collect `(setenv ,var ,val))
      ,@body))
 
 (defmacro letf! (bindings &rest body)
@@ -316,6 +315,52 @@ ARGLIST."
          (allow-other-keys arglist))
       ,@body)))
 
+(defun radian--fn-crawl (data args)
+  (cond ((symbolp data)
+         (when-let*
+             ((lookup '(_ _ %2 %3 %4 %5 %6 %7 %8 %9))
+              (pos (cond ((eq data '%*) 0)
+                         ((memq data '(% %1)) 1)
+                         ((cdr (assq data (seq-map-indexed #'cons lookup)))))))
+           (when (and (= pos 1)
+                      (aref args 1)
+                      (not (eq data (aref args 1))))
+             (error "%% and %%1 are mutually exclusive"))
+           (aset args pos data)))
+        ((and (not (eq (car-safe data) '!))
+              (or (listp data)
+                  (vectorp data)))
+         (seq-doseq (elt data)
+           (radian--fn-crawl elt args)))))
+
+(defmacro fn!! (&rest args)
+  "Return an lambda with implicit, positional arguments.
+The function's arguments are determined recursively from ARGS.  Each symbol from
+`%1' through `%9' that appears in ARGS is treated as a positional argument.
+Missing arguments are named `_%N', which keeps the byte-compiler quiet.  `%' is
+a shorthand for `%1'; only one of these can appear in ARGS.  `%*' represents
+extra `&rest' arguments.
+Instead of:
+  (lambda (a _ c &rest d)
+    (if a c (cadr d)))
+you can use this macro and write:
+  (fn!! (if %1 %3 (cadr %*)))
+which expands to:
+  (lambda (%1 _%2 %3 &rest %*)
+    (if %1 %3 (cadr %*)))
+This macro was adapted from llama.el (see https://git.sr.ht/~tarsius/llama),
+minus font-locking, the outer function call, and minor optimizations."
+  `(lambda ,(let ((argv (make-vector 10 nil)))
+         (radian--fn-crawl args argv)
+         `(,@(let ((n 0))
+               (mapcar (lambda (sym)
+                         (cl-incf n)
+                         (or sym (intern (format "_%%%s" n))))
+                       (reverse (seq-drop-while
+                                 #'null (reverse (seq-subseq argv 1))))))
+           ,@(and (aref argv 0) '(&rest %*))))
+     ,@args))
+
 (defmacro cmd! (&rest body)
   "Returns (lambda () (interactive) ,@body)
 A factory for quickly producing interaction commands, particularly for keybinds
@@ -378,11 +423,11 @@ See `general-key-dispatch' for what other arguments it accepts in BRANCHES."
   `(setq ,sym (seq-uniq (append ,sym ,@lists))))
 
 (defmacro setq! (&rest settings)
-  "A stripped-down `customize-set-variable' with the syntax of `setq'.
+  "A more sensible `setopt' for setting customizable variables.
 
-This can be used as a drop-in replacement for `setq'. Particularly when you know
-a variable has a custom setter (a :set property in its `defcustom' declaration).
-This triggers setters. `setq' does not."
+This can be used as a drop-in replacement for `setq' and *should* be used
+instead of `setopt'. Unlike `setq', this triggers custom setters on variables.
+Unlike `setopt', this won't needlessly pull in dependencies."
   (macroexp-progn
    (cl-loop for (var val) on settings by 'cddr
             collect `(funcall (or (get ',var 'custom-set) #'set)
@@ -392,11 +437,10 @@ This triggers setters. `setq' does not."
   "`delq' ELT from LIST in-place.
 
 If FETCHER is a function, ELT is used as the key in LIST (an alist)."
-  `(setq ,list
-         (delq ,(if fetcher
-                    `(funcall ,fetcher ,elt ,list)
-                  elt)
-               ,list)))
+  `(setq ,list (delq ,(if fetcher
+                          `(funcall ,fetcher ,elt ,list)
+                        elt)
+                     ,list)))
 
 (defmacro pushnew! (place &rest values)
   "Push VALUES sequentially into PLACE, if they aren't already present.

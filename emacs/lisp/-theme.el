@@ -7,7 +7,7 @@
   :group 'radian)
 
 (defvar radian-theme-list '((modus-operandi . 'light) (modus-vivendi . 'dark))
-  "Theme sequence of changing. `(THEME-NAME . IS-LIGHT-THEME)'")
+  "Theme sequence of changing. `(THEME-NAME . *LIGHT-THEME)'")
 
 (defun --l?d (light dark)
   "Determine using the LIGHT or the DARK color of theme."
