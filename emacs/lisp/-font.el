@@ -52,25 +52,27 @@ font to that size. It's rarely a good idea to do so!")
   "A list of fallback font families for general symbol glyphs.")
 
 (defvar radian-cjk-fallback-font-families
-  '("WenQuanYi Micro Hei Mono"
+  '("Zpix"
+    "WenQuanYi Micro Hei Mono"
     "Microsoft YaHei")
   "A list of fallback font families to use for emojis.")
 
+;; I avoid `set-frame-font' at startup because it is expensive; doing extra,
+;; unnecessary work we can avoid by setting the frame parameter directly.
+(setf (alist-get 'font default-frame-alist)
+      (cond ((stringp radian-font)
+             (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*" radian-font radian-font-size))
+            ((fontp radian-font)
+             (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*"
+                     (font-get radian-font :family) radian-font-size))
+            ((signal 'wrong-type-argument (list '(fontp stringp) radian-font)))))
+;;  FIXME: During initialize. this way cannot chang the font
+;; height. I don't know why.
+(set-face-attribute 'default nil :height radian-font-size)
+
 (defun radian-init-font-h (&optional reload)
   "Loads `fonts'"
-  (when (fboundp 'set-fontset-font)
-    (let ((fn (radian-partial (lambda (font) (find-font (font-spec :name font))))))
-      (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
-        (set-fontset-font t 'symbol font))
-      (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
-        (eval-when! *EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
-      (when radian-unicode-font
-        (set-fontset-font t 'unicode radian-unicode-font nil 'append))
-      (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
-        ;; Set CJK font.
-        ;; (dolist (script '(kana han cjk-misc bopomofo))
-        ;;   (set-fontset-font (frame-parameter nil 'font) script font))
-        (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend))))
+  (if (or reload (daemonp)) (set-frame-font radian-font t t t))
 
   (apply #'custom-set-faces
          (let ((attrs '(:weight unspecified :slant unspecified :width unspecified)))
@@ -84,17 +86,16 @@ font to that size. It's rarely a good idea to do so!")
   (dolist (sym '(fixed-pitch fixed-pitch-serif variable-pitch))
     (put sym 'saved-face nil))
 
-  ;;  FIXME: During initialize. this way cannot chang the font
-  ;; height. I don't know why.
-  (set-face-attribute 'default nil :height radian-font-size)
-
-  (if (or reload (daemonp)) (set-frame-font radian-font t t t))
-  ;; I avoid `set-frame-font' at startup because it is expensive; doing extra,
-  ;; unnecessary work we can avoid by setting the frame parameter directly.
-  (setf (alist-get 'font default-frame-alist)
-        (cond ((stringp radian-font)
-               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*" radian-font radian-font-size))
-              ((fontp radian-font)
-               (format "-*-%s-*-*-*-*-*-%s-*-*-*-*-*-*"
-                       (font-get radian-font :family) radian-font-size))
-              ((signal 'wrong-type-argument (list '(fontp stringp) radian-font))))))
+  (when (fboundp 'set-fontset-font)
+    (let ((fn (radian-partial (lambda (font) (find-font (font-spec :name font))))))
+      (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
+        (set-fontset-font t 'symbol font))
+      (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
+        (eval-when! *EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
+      (when radian-unicode-font
+        (set-fontset-font t 'unicode radian-unicode-font nil 'append))
+      (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
+        ;; Set CJK font.
+        ;; (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend)
+        (dolist (script '(kana han cjk-misc bopomofo))
+          (set-fontset-font (frame-parameter nil 'font) script font))))))

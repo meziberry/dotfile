@@ -1246,20 +1246,20 @@ there is a pending network request."
 ;; REVIEW: if `define-key' called above here, shall lead to "Symbol's
 ;; value as variable is void: \213".
 
-(defvar-keymap radian-comma-keymap
-  :doc "Keymap for Radian commands that should be put under a comma prefix.
- This keymap is bound under \\[radian-comma-keymap]."
-  :prefix 'radian-comma-keymap)
+; :doc "Keymap for Radian commands that should be put under a comma prefix.
+; This keymap is bound under \\[radian-comma-keymap]."
+; :prefix 'radian-comma-keymap
+(define-prefix-command 'radian-comma-keymap 'radian-comma-keymap)
 
-(defvar-keymap radian-zip-keymap
-  :doc "Keymap for Radian commands that should be put under a zip prefix.
- This keymap is bound under \\[radian-zip-keymap]."
-  :prefix 'radian-zip-keymap
-  "z" #'eval-last-sexp)
+; :doc "Keymap for Radian commands that should be put under a zip prefix.
+; This keymap is bound under \\[radian-zip-keymap]."
+; :prefix 'radian-zip-keymap
+(define-prefix-command 'radian-zip-keymap 'radian-zip-keymap)
+(define-key radian-zip-keymap "z" #'eval-last-sexp)
 
-(defvar-keymap radian-keymap
-  :doc "Keymap for Radian commands that should be put under a prefix.
-This keymap is bound under \\[radian-keymap].")
+(defvar radian-keymap (make-sparse-keymap))
+;  :doc "Keymap for Radian commands that should be put under a prefix.
+;This keymap is bound under \\[radian-keymap].")
 
 (define-key global-map "\M-P" radian-keymap)
 

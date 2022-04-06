@@ -75,14 +75,85 @@ Version 2014-10-21 2021-11-26 2021-11-30"
      (t (progn
           (message "nothing done. logic error 40873. shouldn't reach here"))))))
 
-(defun consult-line-or-visit-p ()
-  (<= (buffer-size)
-      (/ 300000 (if (eq major-mode 'org-mode) 2 1))))
-
 ;;;###autoload
 (defun consult-line-or-isearch ()
   "Use `consult-line' for little file and `isearch' for larger one"
   (interactive)
-  (call-interactively (if (and (fboundp 'consult-line) (consult-line-or-visit-p))
-                          #'consult-line
-                        #'isearch-forward)))
+  (letf!
+    (defun consult-line-or-visit-p ()
+      (<= (buffer-size)
+          (/ 300000 (if (eq major-mode 'org-mode) 2 1))))
+    (call-interactively (if (and (fboundp 'consult-line) (consult-line-or-visit-p))
+                            #'consult-line
+                          #'isearch-forward))))
+
+(defcustom radian-simple-insert-pair-alist
+  '(("' Single quote"        . (39 39))     ; ' '
+    ("\" Double quotes"      . (34 34))     ; " "
+    ("` Elisp quote"         . (96 39))     ; ` '
+    ("‘ Single apostrophe"   . (8216 8217)) ; ‘ ’
+    ("“ Double apostrophes"  . (8220 8221)) ; “ ”
+    ("( Parentheses"         . (40 41))     ; ( )
+    ("{ Curly brackets"      . (123 125))   ; { }
+    ("[ Square brackets"     . (91 93))     ; [ ]
+    ("< Angled brackets"     . (60 62))     ; < >
+    ("« Double angled quote" . (171 187))   ; « »
+    ("= Equals signs"        . (61 61))     ; = =
+    ("~ Tilde"               . (126 126))   ; ~ ~
+    ("* Asterisks"           . (42 42))     ; * *
+    ("/ Forward Slash"       . (47 47))     ; / /
+    ("_ underscores"         . (95 95)))    ; _ _
+  "Alist of pairs for radian-simple-insert-pair"
+  :type 'alist
+  :group 'simple)
+(defvar radian-simple--character-hist '()
+  "History of inputs for `radian-simple-insert-pair")
+
+(defun radian-simple--character-prompt (chars)
+  "Helper of `radian-simple-insert-pair' to read CHARS."
+  (let ((def (car radian-simple--character-hist)))
+    (completing-read
+     (format "Select character [%s]: " def)
+     chars nil t nil 'radian-simple--character-hist def)))
+
+;;;###autoload
+(defun radian-simple-insert-pair (pair &optional count)
+  "Insert PAIR from `radian-simple-insert-pair-alist'.
+Operate on the symbol at point.  If the region is active, use it
+instead.
+
+With optional COUNT (either as a natural number from Lisp or a
+universal prefix argument (\\[universal-argument]) when used
+interactively) prompt for the number of delimiters to insert."
+  (interactive
+   (list (radian-simple--character-prompt
+          radian-simple-insert-pair-alist)
+         current-prefix-arg))
+  (let* ((data radian-simple-insert-pair-alist)
+         (left (cadr (assoc pair data)))
+         (right (caddr (assoc pair data)))
+         (n (cond
+             ((and count (natnump count))
+              count)
+             (count
+              (read-number "How many delimiters?" 2))
+             (1)))
+         (beg)
+         (end))
+    (cond
+     ((region-active-p)
+      (setq beg (region-beginning)
+            end (region-end)))
+     ((when (thing-at-point 'symbol)
+        (let ((bounds (bounds-of-thing-at-point 'symbol)))
+          (setq beg (car bounds)
+                end (cdr bounds)))))
+     (t (setq beg (point)
+              end (point))))
+    (save-excursion
+      (goto-char end)
+      (dotimes (_ n)
+        (insert right))
+      (goto-char beg)
+      (dotimes (_ n)
+        (insert left)))))

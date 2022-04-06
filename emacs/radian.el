@@ -32,6 +32,7 @@
     'native-comp-async-env-modifier-form
     '(load (expand-file-name "init.el" user-emacs-directory) t t t))
    (customize-set-variable 'native-comp-compiler-options '("-O2" "-mtune=native"))
+   (customize-set-variable 'native-comp-async-jobs-number 1)
    ;; Disable byte-compilation warnings from native-compiled
    ;; packages from being reported asynchronously into the UI.
    (customize-set-variable 'native-comp-async-report-warnings-errors nil)))
@@ -198,7 +199,7 @@ dependencies or long-term shared data. Must end with a slash.")
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages
-  '(haskell-mode ligature)
+  '(haskell-mode ligature symbol-overlay dirvish)
   "List of packages that Radian should not load.
 If the list starts with `:not', packages that are not part of this
 list are not loaded instead. This variable should be modified in
@@ -445,11 +446,23 @@ hook directly into the init-file during byte-compilation."
 ;; handy!
 (setq enable-recursive-minibuffers t)
 
+(setq minibuffer-eldef-shorten-default t)
+
+;; Do not allow the cursor to move inside the minibuffer prompt.  I
+;; got this from the documentation of Daniel Mendler's Vertico
+;; package: <https://github.com/minad/vertico>.
+(setq minibuffer-prompt-properties
+      '(read-only t cursor-intangible t face minibuffer-prompt))
+(add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
+
+(file-name-shadow-mode 1)
+(minibuffer-depth-indicate-mode 1)
+(minibuffer-electric-default-mode 1)
+
 ;; Doesn't exist in terminal Emacs, but some Emacs packages (internal and
 ;; external) use it anyway, leading to a void-function error, so define a no-op
 ;; substitute to suppress them.
 (unless (fboundp 'define-fringe-bitmap) (fset 'define-fringe-bitmap #'ignore))
-
 
 ;;;; EasyPG/EPG(GNU Privacy Guard(GnuPG))
 (after! epa
@@ -1997,7 +2010,6 @@ or if the current buffer is read-only or not file-visiting."
 
 ;;;; HEAD-CORE 
 ;;; MODULE {Vertico}
-
 (defadvice! radian--advice-eval-expression-save-garbage
   (func prompt &optional initial-contents keymap read &rest args)
   "Save user input in history even if it's not a valid sexp.
@@ -2021,7 +2033,7 @@ ourselves."
 (-ow vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
-  :bind (radian-comma-keymap ("&" . vertico-repeat))
+  :bind (radian-comma-keymap ("&" . +vertico/resume))
   :hook radian-first-input-hook
   :chord (:vertico-map (".." . vertico-quick-exit))
   :config
@@ -2256,7 +2268,7 @@ completing-read prompter."
 
   :blackout t)
 
-;;;; Highlight symbols
+;;;; symbols overlay
 (pow! symbol-overlay
   :hook
   ((prog-mode-hook html-mode-hook yaml-mode-hook conf-mode-hook) . symbol-overlay-mode)
@@ -2785,6 +2797,7 @@ buffer."
         (set-window-configuration radian--ediff-saved-wconf)))))
 
 ;;;; server
+
 (-ow server
   :when (display-graphic-p)
   :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
@@ -3014,110 +3027,36 @@ and cannot run in."
         show-paren-when-point-inside-paren t
         show-paren-when-point-in-periphery t))
 
-;; Package `smartparens' provides an API for manipulating paired
-;; delimiters of many different types, as well as interactive commands
-;; and keybindings for operating on paired delimiters at the
-;; s-expression level. It provides a Paredit compatibility layer.
-(pow! smartparens
-  :hook (radian-first-buffer-hook . smartparens-global-mode)
-  :defun sp-message sp-region-ok-p
-  :commands sp-pair sp-local-pair sp-with-modes sp-point-in-comment sp-point-in-string
-  ;; markdown-mode lsp
-  ;; radian--advice-lsp-mode-silence company-explicit-action-p company--should-begin
-  ;; company--should-continue global-company-mode
+(-ow electric
+  :hook (radian-first-buffer-hook . electric-pair-mode)
+  :setq
+  (electric-pair-inhibit-predicate . 'electric-pair-conservative-inhibit)
+  (electric-pair-preserve-balance . t)
+  (electric-pair-pairs . '((8216 . 8217)(8220 . 8221)(171 . 187)))
+  (electric-pair-skip-self . 'electric-pair-default-skip-self)
+  (electric-pair-skip-whitespace . nil)
+  (electric-pair-skip-whitespace-chars . '(9 10 32))
+  (electric-quote-context-sensitive . t)
+  (electric-quote-paragraph . t)
+  (electric-quote-string . nil)
+  (electric-quote-replace-double . t)
   :config
+  (electric-quote-mode -1))
 
-  ;; Load the default pair definitions for Smartparens.
-  (require 'smartparens-config)
-
-  ;; When in Paredit emulation mode, Smartparens binds M-( to wrap the
-  ;; following s-expression in round parentheses. By analogy, we
-  ;; should bind M-[ to wrap the following s-expression in square
-  ;; brackets. However, this breaks escape sequences in the terminal,
-  ;; so it may be controversial upstream. We only enable the
-  ;; keybinding in windowed mode.
-  (when (display-graphic-p)
-    (setf (map-elt sp-paredit-bindings "M-[") #'sp-wrap-square))
-
-  ;; Set up keybindings for s-expression navigation and manipulation
-  ;; in the style of Paredit.
-  (sp-use-paredit-bindings)
-
-  ;; Highlight matching delimiters.
-  (show-smartparens-global-mode +1)
-
-  ;; Prevent all transient highlighting of inserted pairs.
-  (setq sp-highlight-pair-overlay nil)
-  (setq sp-highlight-wrap-overlay nil)
-  (setq sp-highlight-wrap-tag-overlay nil)
-
-  ;; Don't disable autoskip when point moves backwards. (This lets you
-  ;; open a sexp, type some things, delete some things, etc., and then
-  ;; type over the closing delimiter as long as you didn't leave the
-  ;; sexp entirely.)
-  (setq sp-cancel-autoskip-on-backward-movement nil)
-
-  ;; Disable Smartparens in Org-related modes, since the keybindings
-  ;; conflict.
-
-  (-ow! org
-    :config
-
-    (add-to-list 'sp-ignore-modes-list #'org-mode))
-
-  (-ow! org-agenda
-    :config
-
-    (add-to-list 'sp-ignore-modes-list #'org-agenda-mode))
-
-  ;; Make C-k kill the sexp following point in Lisp modes, instead of
-  ;; just the current line.
-  (-key [remap kill-line] #'sp-kill-hybrid-sexp 'smartparens-mode-map)
-
-  (defun radian--smartparens-indent-new-pair (&rest _)
-    "Insert an extra newline after point, and reindent."
-    (newline)
-    (indent-according-to-mode)
-    (forward-line -1)
-    (indent-according-to-mode))
-
-  ;; The following is a really absurdly stupid hack that I can barely
-  ;; stand to look at. It needs to be fixed.
-  ;;
-  ;; Nevertheless, I can't live without the feature it provides (which
-  ;; should really come out of the box IMO): when pressing RET after
-  ;; inserting a pair, add an extra newline and indent. See
-  ;; <https://github.com/Fuco1/smartparens/issues/80#issuecomment-18910312>.
-
-  (defun radian--smartparens-pair-setup (mode delim)
-    "In major mode MODE, set up DELIM with newline-and-indent."
-    (sp-local-pair mode delim nil :post-handlers
-                   '((radian--smartparens-indent-new-pair "RET")
-                     (radian--smartparens-indent-new-pair "<return>"))))
-
-  (dolist (delim '("(" "[" "{"))
-    (dolist (mode '(
-                    fundamental-mode
-                    javascript-mode
-                    protobuf-mode
-                    prog-mode
-                    text-mode
-                    ))
-      (radian--smartparens-pair-setup mode delim)))
-  (radian--smartparens-pair-setup #'python-mode "\"\"\"")
-  (radian--smartparens-pair-setup #'markdown-mode "```")
-
-  ;; Deal with `protobuf-mode' not using `define-minor-mode'.
-  (radian--smartparens-pair-setup #'protobuf-mode "{")
-
-  ;; Work around https://github.com/Fuco1/smartparens/issues/783.
-  (setq sp-escape-quotes-after-insert nil)
-
-  ;; Quiet some silly messages.
-  (dolist (key '(:unmatched-expression :no-matching-tag))
-    (setf (cdr (assq key sp-message-alist)) nil))
-
-  :blackout t)
+(pow puni
+  :hook (radian-first-buffer-hook . puni-global-mode)
+  :bind (puni-mode-map
+         ("DEL" . (cmds! (minibufferp) #'vertico-directory-delete-char
+                         #'puni-backward-delete-char))
+         ("C-<right>"   . puni-slurp-forward)
+         ("C-<left>"    . puni-barf-forward)
+         ("M-<right>"   . puni-slurp-backword)
+         ("M-<left>"    . puni-barf-backword)
+         ("M-D"         . puni-squeeze)
+         ("M-s"         . puni-splice)
+         ("M-S"         . puni-split)
+         ("C-M-u"       . puni-raise)
+         ("M-?"         . puni-convolute)))
 
 ;;;; Code reformatting
 
@@ -4008,7 +3947,7 @@ was printed, and only have ElDoc display if one wasn't."
       (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
             lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")))
 (pow! flutter :bind (dart-mode-map ("r" . flutter-run-or-hot-reload)))
-(pow! hover :when (featurep! 'flutter)) ;; (set-popup-rule! "\\*Hover\\*" :quit nil)
+(pow! hover :when (featurep! 'flutter) :init (set-popup-rule! "\\*Hover\\*" :quit nil))
 
 ;;;; AppleScript
 ;; https://developer.apple.com/library/content/documentation/AppleScript/Conceptual/AppleScriptLangGuide/introduction/ASLR_intro.html
@@ -6246,7 +6185,7 @@ turn it off again after creating the first frame."
 ;;;; Mode line
 (-ow! recursion-indicator
   :straight (recursion-indicator :host github :repo "minad/recursion-indicator")
-  :custom (recursion-indicator-minibuffer . "⮜")
+  :custom (recursion-indicator-minibuffer . "◀")
   :init (recursion-indicator-mode +1))
 
 ;; Normally the buffer name is right-padded with whitespace until it
@@ -6270,15 +6209,13 @@ spaces."
 
 ;; <https://github.com/minad/recursion-indicator>
 ;; remove the default recursion indicator
-(let ((index 0))
-  (dolist (e mode-line-modes)
-    (cond
-     ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
-      (setf (nth index mode-line-modes) ""))
-     ((equal "(" e) (setf (nth index mode-line-modes) "⟿")) ;
-     ((equal ")" e) (setf (nth index mode-line-modes) ""))
-     (t))
-    (setq index (1+ index))))
+(cl-loop with index = 0
+         for e in mode-line-modes do
+         (cond ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
+                (setf (nth index mode-line-modes) ""))
+               ((equal "(" e) (setf (nth index mode-line-modes) ":"))
+               ((equal ")" e) (setf (nth index mode-line-modes) ";")))
+         (setq index (1+ index)))
 
 (defcustom radian-mode-line-left
   '(""
@@ -6301,8 +6238,7 @@ spaces."
   '(""
     (vc-mode vc-mode)
     " "
-    (:eval (when (featurep 'meow) (meow-indicator)))
-    " ")
+    (:eval (when (featurep 'meow) (meow-indicator))))
   "Composite mode line construct to be shown right-aligned."
   :type 'sexp)
 
@@ -6428,8 +6364,7 @@ bound dynamically before being used.")
               (pcase key
                 ((or ?y ?Y) (funcall save-buffers-kill-emacs arg))
                 ((or ?n ?N))
-                ((or ?r ?R)
-                 (restart-emacs arg))
+                ((or ?r ?R) (restart-emacs arg))
                 ((or ?e ?E)
                  (restart-emacs-start-new-emacs
                   (restart-emacs--translate-prefix-to-args arg)))

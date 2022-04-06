@@ -16,9 +16,9 @@
 (-ow modus-themes
   :init
   (setq modus-themes-vivendi-color-overrides
-        '((bg-main . "#2E3440") (fg-unfocused . "#ECEFF4")))
-  (setq modus-themes-operandi-color-overrides
-        '((bg-main . "#FFFFFF") (fg-unfocused . "#37474F")))
+        '((bg-main . "#2E3440"))
+        modus-themes-operandi-color-overrides
+        '((bg-main . "#ECEFF1")))
 
   (setq modus-themes-italic-constructs t
         modus-themes-bold-constructs t
