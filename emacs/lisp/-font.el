@@ -86,16 +86,17 @@ font to that size. It's rarely a good idea to do so!")
   (dolist (sym '(fixed-pitch fixed-pitch-serif variable-pitch))
     (put sym 'saved-face nil))
 
-  (when (fboundp 'set-fontset-font)
-    (let ((fn (radian-partial (lambda (font) (find-font (font-spec :name font))))))
-      (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
-        (set-fontset-font t 'symbol font))
-      (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
-        (eval-when! *EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
-      (when radian-unicode-font
-        (set-fontset-font t 'unicode radian-unicode-font nil 'append))
-      (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
-        ;; Set CJK font.
-        ;; (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend)
-        (dolist (script '(kana han cjk-misc bopomofo))
-          (set-fontset-font (frame-parameter nil 'font) script font))))))
+  (and
+   (fboundp 'set-fontset-font)
+   (let ((fn (apply-partially (lambda (font) (find-font (font-spec :name font))))))
+     (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
+       (set-fontset-font t 'symbol font))
+     (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))
+       (eval-when! *EMACS28+ (set-fontset-font t 'emoji font nil 'append)))
+     (when radian-unicode-font
+       (set-fontset-font t 'unicode radian-unicode-font nil 'append))
+     (when-let (font (cl-find-if fn radian-cjk-fallback-font-families))
+       ;; Set CJK font.
+       ;; (set-fontset-font t '(#x4e00 . #x9fff) font nil 'prepend)
+       (dolist (script '(kana han cjk-misc bopomofo))
+         (set-fontset-font (frame-parameter nil 'font) script font))))))

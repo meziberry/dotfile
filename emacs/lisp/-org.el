@@ -225,7 +225,7 @@
   (defvar ob-async-no-async-languages-alist)
   (defvar +org-babel-mode-alist) )
 
-(exclude "I don't use babel"
+(eval-unless! "I don't use babel"
 (defun +org-init-babel-h ()
   (setq org-src-preserve-indentation t  ; use native major-mode indentation
         org-src-tab-acts-natively t     ; we do this ourselves
@@ -839,7 +839,7 @@ can grow up to be fully-fledged org-mode buffers."
   ;; Disable the slow defaults
   (provide 'smartparens-org))
 
-(exclude "NOT USE"
+(eval-unless! "NOT USE"
 (defun +org-init-protocol-lazy-loader-h ()
    "Brings lazy-loaded support for org-protocol, so external programs (like
 browsers) can invoke specialized behavior from Emacs. Normally you'd simply

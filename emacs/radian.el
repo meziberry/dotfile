@@ -199,7 +199,7 @@ dependencies or long-term shared data. Must end with a slash.")
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages
-  '(haskell-mode ligature symbol-overlay dirvish)
+  '(haskell-mode ligature symbol-overlay dirvish lsp-pyright)
   "List of packages that Radian should not load.
 If the list starts with `:not', packages that are not part of this
 list are not loaded instead. This variable should be modified in
@@ -658,6 +658,7 @@ binding the variable dynamically over the entire init-file."
 
 (sup 'leaf)
 (sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz"))
+(sup 'blackout)
 
 (-ow leaf-keywords
   :require t
@@ -702,23 +703,24 @@ binding the variable dynamically over the entire init-file."
                        (delq t leaf--value)
                      leaf--value))))
               leaf-normalize)
+
   ;; when disable feature, register it's recipe.
-  (setq leaf-keywords
-        (plist-put
-         leaf-keywords
-         :disabled
-         '(if (eval (car leaf--value))
-              `(,@(mapcar
-                   (lambda (elm) `(straight-register-package ',elm))
-                   (let ((recipes (plist-get leaf--rest :straight)))
-                     ;; If have the recipe from :straight.
-                     (unless (eq (car-safe recipes) nil)
-                       (mapcar
-                        (lambda (elm) (if (eq t elm) leaf--name elm))
-                        (if (alist-get leaf--name recipes)
-                            (delq t recipes)
-                          recipes))))))
-            `(,@leaf--body))))
+  ;; (setq leaf-keywords
+  ;;       (plist-put
+  ;;        leaf-keywords
+  ;;        :disabled
+  ;;        '(if (eval (car leaf--value))
+  ;;             `(,@(mapcar
+  ;;                  (lambda (elm) `(straight-register-package ',elm))
+  ;;                  (let ((recipes (plist-get leaf--rest :straight)))
+  ;;                    ;; If have the recipe from :straight.
+  ;;                    (unless (eq (car-safe recipes) nil)
+  ;;                      (mapcar
+  ;;                       (lambda (elm) (if (eq t elm) leaf--name elm))
+  ;;                       (if (alist-get leaf--name recipes)
+  ;;                           (delq t recipes)
+  ;;                         recipes))))))
+  ;;           `(,@leaf--body))))
 
   ;; 3) Load package when compiling
   ;; non-nil : require package when compiling.
@@ -738,6 +740,16 @@ binding the variable dynamically over the entire init-file."
 
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
+
+;;;; No-littering
+;; Package `no-littering' changes the default paths for lots of
+;; different packages, with the net result that the ~/.emacs.d folder
+;; is much more clean and organized.
+(pow no-littering
+  :pre-setq
+  (no-littering-etc-directory . *etc/*)
+  (no-littering-var-directory . *cache/*)
+  :require t)
 
 ;; el-patch
 (pow el-patch :custom (el-patch-enable-use-package-integration . nil))
@@ -761,18 +773,6 @@ If PKG passed, require PKG before binding."
          ,(when pkg `(require ,pkg))
          (when ,pkg (require ,pkg)))
        (leaf-key ,key ,kmap ,keymap))))
-
-;;;; No-littering
-;; Package `no-littering' changes the default paths for lots of
-;; different packages, with the net result that the ~/.emacs.d folder
-;; is much more clean and organized.
-(pow no-littering
-  :pre-setq
-  (no-littering-etc-directory . *etc/*)
-  (no-littering-var-directory . *cache/*)
-  :require t)
-
-(pow blackout)
 
 ;; REVIEW: let the obsolete warning shutup.
 (advice-add 'with-demoted-errors :around #'fn-quiet!)
@@ -1414,17 +1414,15 @@ unquote it using a comma."
 
 ;; Package `which-key' displays the key bindings and associated
 ;; commands following the currently-entered key prefix in a popup.
-(pow! which-key
+(pow which-key
   :init (which-key-mode +1)
-
-  :config
+  :setq
   ;; We configure it so that `which-key' is triggered by typing C-h
   ;; during a key sequence (the usual way to show bindings). See
   ;; <https://github.com/justbur/emacs-which-key#manual-activation>.
-  (setq which-key-show-early-on-C-h t)
-  (setq which-key-idle-delay most-positive-fixnum)
-  (setq which-key-idle-secondary-delay 1e-100)
-
+  (which-key-show-early-on-C-h . t)
+  (which-key-idle-delay . most-positive-fixnum)
+  (which-key-idle-secondary-delay . 1e-100)
   :blackout t)
 
 ;;;; Universal, non-nuclear escape
@@ -2033,7 +2031,7 @@ ourselves."
 (-ow vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
-  :bind (radian-comma-keymap ("&" . +vertico/resume))
+  :bind (radian-comma-keymap ("&" . vertico-repeat))
   :hook radian-first-input-hook
   :chord (:vertico-map (".." . vertico-quick-exit))
   :config
@@ -2196,21 +2194,21 @@ orderless."
   :straight (embark :type git :host github :repo "oantolin/embark"
                     :files ("embark-consult.el" "embark.el" "embark.texi"
                             "avy-embark-collect.el"))
+  :pre-setq
+  (which-key-use-C-h-commands . nil)
+  (prefix-help-command . #'embark-prefix-help-command)
   :init
   (-keys (minibuffer-local-map
           ("C-;" . embark-export)
-          ("C-c C-s" . embark-collect-snapshot)
+          ("C-c C-l" . embark-collect)
           ("C-c C-e" . +vertico/embark-export-write)))
-
   :bind
   ([remap describe-bindings] . embark-bindings)
   ("M-;" . embark-act)
   ("M-." . embark-dwim)
   ("C-x g" . (cmds! (featurep 'magit-status) #'magit-status #'+vertico/embark-magit-status))
+  :hook (embark-collect-mode-hook . consult-preview-at-point-mode)
   :config
-  (setq which-key-use-C-h-commands nil
-        prefix-help-command #'embark-prefix-help-command)
-
   (defadvice! +vertico--embark-which-key-prompt-a (fn &rest args)
     "Hide the which-key indicator immediately when using the
 completing-read prompter."
@@ -2219,17 +2217,11 @@ completing-read prompter."
     (let ((embark-indicators
            (remq 'embark-which-key-indicator embark-indicators)))
       (apply fn args)))
+  (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators)
 
-  (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators))
-
-
-(-ow embark-consult
-  :after embark consult
-  :require t
-  :config (add-hook 'embark-collect-mode-hook #'consult-preview-at-point-mode))
+  (eval-after-load 'consult '(require 'embark-consult)))
 
 (pow marginalia
-
   :hook radian-first-input-hook
   :bind (minibuffer-local-map ("M-A" . marginalia-cycle))
   :config
@@ -2239,9 +2231,7 @@ completing-read prompter."
             '(project-switch-to-buffer . buffer)
             '(project-switch-project . project-file)))
 
-(pow wgrep
-  :commands wgrep-change-to-wgrep-mode
-  :config (setq wgrep-auto-save-buffer t))
+(pow wgrep :commands wgrep-change-to-wgrep-mode :setq (wgrep-auto-save-buffer . t))
 
 ;;;; isearch
 (-ow isearch
@@ -2282,7 +2272,6 @@ completing-read prompter."
 ;;;; Project
 (-ow project
   :init
-
   (setq project-switch-commands
         '((project-find-file "File" ?f)
           (project-find-regexp "Grep" ?g)
@@ -2476,9 +2465,8 @@ Interactively, reverse the characters in the current region."
 
 ;; Trigger auto-fill after punctutation characters, not just
 ;; whitespace.
-(mapc
- (lambda (c) (set-char-table-range auto-fill-chars c t))
- "!-=+]};:'\",.?")
+(mapc (lambda (c) (set-char-table-range auto-fill-chars c t))
+      "!-=+]};:'\",.?")
 
 ;; We could maybe use the variable `comment-auto-fill-only-comments'
 ;; for this, but I wrote this code before I knew about it. Also, I'm
@@ -3021,11 +3009,11 @@ and cannot run in."
 (-ow paren
   ;; highlight matching delimiters
   :hook (radian-first-buffer-hook . show-paren-mode)
-  :config
-  (setq show-paren-delay 0.1
-        show-paren-highlight-openparen t
-        show-paren-when-point-inside-paren t
-        show-paren-when-point-in-periphery t))
+  :setq
+  (show-paren-delay . 0.1)
+  (show-paren-highlight-openparen . t)
+  (show-paren-when-point-inside-paren . t)
+  (show-paren-when-point-in-periphery . t))
 
 (-ow electric
   :hook (radian-first-buffer-hook . electric-pair-mode)
@@ -3646,7 +3634,6 @@ menu to disappear and then come back after `company-idle-delay'."
 ;;   :config
 ;;   (setq company-show-numbers t
 ;;         company-tabnine-always-trigger nil)
-
 ;;   (setq company-backends (cons '(company-tabnine :separate company-capf)
 ;;                                company-backends)))
 
@@ -4305,7 +4292,19 @@ Return either a string or nil."
               (when (file-directory-p venv)
                 (cl-return venv)))))))))
 ;; lsp for python
-(pow! lsp-pyright :after python :require t)
+(pow! lsp-pyright
+  :after python-mode lsp-mode
+  :hook (python-mode-hook . radian--lsp-pyright-discover-virtualenvs)
+  :config
+  (defun radian--lsp-pyright-discover-virtualenvs ()
+    "Discover virtualenvs and add them to `lsp-pyright-extra-paths' and `exec-path'."
+    (let ((exec-path exec-path))
+      (when-let ((venv (radian--python-find-virtualenv)))
+        (setq lsp-pyright-extra-paths
+              (file-expand-wildcards
+               (expand-file-name
+                "lib/python*/site-packages" venv)))
+        (push (expand-file-name "bin" venv) exec-path)))))
 
 ;;;; Shell
 ;; http://pubs.opengroup.org/onlinepubs/9699919799/utilities/sh.html
@@ -5410,11 +5409,56 @@ are probably not going to be installed."
 
 ;; Feature `term' provides a workable, though slow, terminal emulator
 ;; within Emacs.
-(-ow! term
+(-ow term
   ;; Allow usage of more commands from within the terminal.
   :bind (term-raw-map
          ("M-x" . execute-extended-command)
          ("C-h" . help-command)))
+
+(eval-unless! *WINDOWS "vterm cannot run on windows"
+(-ow vterm
+  :when (or *MAC *LINUX *BSD)
+  :bind (vterm-mode-map
+         ("C-y" . vterm-yank)
+         ("M-y" . vterm-yank-pop)
+         ("C-k" . vterm-send-C-k-and-kill)
+         ("M-x" . execute-extended-command)
+         ("C-h" . help-command))
+  :init
+  (setq vterm-shell "zsh")
+  :config
+  (setq vterm-always-compile-module t)
+  (defun vterm-send-C-k-and-kill ()
+    "Send `C-k' to libvterm, and put content in kill-ring."
+    (interactive)
+    (kill-ring-save (point) (vterm-end-of-line))
+    (vterm-send-key "k" nil nil t)))
+
+(pow! vterm-toggle
+  :bind (([f8] . vterm-toggle)
+         ([f9] . vterm-compile)
+         (vterm-mode-map
+          ([f8] . vterm-toggle)
+          ([(control return)] . vterm-toggle-insert-cd)))
+  :config
+  (setq vterm-toggle-cd-auto-create-buffer nil)
+  (defvar vterm-compile-buffer nil)
+  (defun vterm-compile ()
+    "Compile the program including the current buffer in `vterm'."
+    (interactive)
+    (let* ((command (eval compile-command))
+           (w (vterm-toggle--get-window)))
+      (setq compile-command (compilation-read-command command))
+      (let ((vterm-toggle-use-dedicated-buffer t)
+            (vterm-toggle--vterm-dedicated-buffer (if w (vterm-toggle-hide)
+                                                    vterm-compile-buffer)))
+        (with-current-buffer (vterm-toggle-cd)
+          (setq vterm-compile-buffer (current-buffer))
+          (rename-buffer "*vterm compilation*")
+          (compilation-shell-minor-mode 1)
+          (vterm-send-M-w)
+          (vterm-send-string compile-command t)
+          (vterm-send-return)))))))
 
 ;;;; Version control
 
@@ -5424,7 +5468,7 @@ are probably not going to be installed."
 ;; Disable VC. This improves performance and disables some annoying
 ;; warning messages and prompts, especially regarding symlinks. See
 ;; https://stackoverflow.com/a/6190338/3538165.
-(exclude "I USE VC" (-ow vc-hooks :config (setq vc-handled-backends nil)))
+(eval-unless! "I USE VC" (-ow vc-hooks :setq (vc-handled-backends . nil)))
 
 ;; Feature `smerge-mode' provides an interactive mode for visualizing
 ;; and resolving Git merge conflicts.
@@ -5760,7 +5804,7 @@ Instead, display simply a flat colored region in the fringe."
 ;;;; Internet applications
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
-(exclude "WIP"
+(eval-unless! "WIP"
 (-ow! browse-url
   :bind ("C-c C-o" . (cmds! (radian--browse-url-predicate) #'browse-url-at-point))
   :init
@@ -6213,8 +6257,8 @@ spaces."
          for e in mode-line-modes do
          (cond ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
                 (setf (nth index mode-line-modes) ""))
-               ((equal "(" e) (setf (nth index mode-line-modes) ":"))
-               ((equal ")" e) (setf (nth index mode-line-modes) ";")))
+               ((equal "(" e) (setf (nth index mode-line-modes) "["))
+               ((equal ")" e) (setf (nth index mode-line-modes) "]")))
          (setq index (1+ index)))
 
 (defcustom radian-mode-line-left

@@ -2,13 +2,6 @@
 
 ;;
 ;;; Some tiny function
-(defmacro exclude (cond &optional doc &rest args)
-  "Exclude exps according to COND"
-  (declare (doc-string 2)
-           (indent (lambda (_ s) (goto-char (elt s 1)) (current-column))))
-  (unless (stringp doc) (push doc args))
-  (unless (eval cond) (macroexp-progn args)))
-
 (defun radian--resolve-hook-forms (hooks)
   "Converts a list of modes into a list of hook symbols.
 
@@ -82,8 +75,6 @@ same arguments as `message'."
                              'face 'warning)
                  format-string)
         ,@args))))
-
-(defalias 'radian-partial #'apply-partially)
 
 (defun radian-rpartial (fn &rest args)
   "Return a partial application of FUN to right-hand ARGS.
@@ -255,6 +246,13 @@ except that FORCE-P is no-nil."
                    (unless visit (setq visit 'no-message))
                    (funcall write-region start end filename append visit lockname mustbenew)))
            ,@forms))))
+
+(defmacro eval-unless! (cond &optional doc &rest args)
+  "Exclude exps according to COND"
+  (declare (doc-string 2)
+           (indent (lambda (_ s) (goto-char (elt s 1)) (current-column))))
+  (unless (stringp doc) (push doc args))
+  (unless (eval cond) (macroexp-progn args)))
 
 (defmacro eval-if! (cond then &rest body)
   "Expands to THEN if COND is non-nil, to BODY otherwise.

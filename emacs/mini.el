@@ -49,6 +49,7 @@ init-file is loaded, not just once.")
     'native-comp-async-env-modifier-form
     '(load (expand-file-name "init.el" user-emacs-directory) t t t))
    (customize-set-variable 'native-comp-compiler-options '("-O2" "-mtune=native"))
+   (customize-set-variable 'native-comp-async-jobs-number 1)
    ;; Disable byte-compilation warnings from native-compiled
    ;; packages from being reported asynchronously into the UI.
    (customize-set-variable 'native-comp-async-report-warnings-errors nil)))
@@ -170,7 +171,7 @@ dependencies or long-term shared data. Must end with a slash.")
 
 ;;
 ;;; Some tiny function
-(defmacro exclude (cond &optional doc &rest args)
+(defmacro eval-unless! (cond &optional doc &rest args)
   "Exclude exps according to COND"
   (declare (doc-string 2)
            (indent (lambda (_ s) (goto-char (elt s 1)) (current-column))))
@@ -250,8 +251,6 @@ same arguments as `message'."
                              'face 'warning)
                  format-string)
         ,@args))))
-
-(defalias 'radian-partial #'apply-partially)
 
 (defun radian-rpartial (fn &rest args)
   "Return a partial application of FUN to right-hand ARGS.
@@ -4013,7 +4012,7 @@ font to that size. It's rarely a good idea to do so!")
 (defun radian-init-font-h (&optional reload)
   "Loads `fonts'"
   (when (fboundp 'set-fontset-font)
-    (let ((fn (radian-partial (lambda (font) (find-font (font-spec :name font))))))
+    (let ((fn (apply-partially (lambda (font) (find-font (font-spec :name font))))))
       (when-let (font (cl-find-if fn radian-symbol-fallback-font-families))
         (set-fontset-font t 'symbol font))
       (when-let (font (cl-find-if fn radian-emoji-fallback-font-families))

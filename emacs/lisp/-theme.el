@@ -125,7 +125,7 @@
           (5 . (1))
           (t . (rainbow 1)))))
 
-(exclude "prefer modus"
+(eval-unless! "prefer modus"
 (-ow nano-theme
   :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
   :custom
