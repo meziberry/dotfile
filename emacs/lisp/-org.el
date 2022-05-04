@@ -41,7 +41,7 @@
    org-id-locations-file-relative t
    ;; Prevent modifications made in invisible sections of an org document, as
    ;; unintended changes can easily go unseen otherwise.
-   org-catch-invisible-edits 'smart
+   org-fold-catch-invisible-edits 'smart
    ;; Don't number headings with these tags
    org-num-face '(:inherit org-special-keyword :underline nil :weight bold)
    org-num-skip-tags '("noexport" "nonum")
@@ -200,7 +200,7 @@
         org-attach-use-inheritance t) ; inherit properties from parent nodes
 
   ;; Autoload all these commands that org-attach doesn't autoload itself
-  `(eval (-ow! org-attach
+  `(eval (x org-attach/m
            :commands (org-attach-new
                       org-attach-open
                       org-attach-open-in-emacs
@@ -566,10 +566,11 @@ relative to `org-directory', unless it is an absolute path."
   "TODO"
   (setq org-export-with-smart-quotes t
         org-html-validation-link nil
+        org-export-in-background t       ; run export processes in external emacs process
         org-latex-prefer-user-labels t)
 
   `(eval
-    (-ow! ox-pandoc
+    (x ox-pandoc/m
       :when (executable-find "pandoc")
       :after ox
       :init

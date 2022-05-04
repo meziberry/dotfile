@@ -70,21 +70,44 @@ font to that size. It's rarely a good idea to do so!")
 ;; height. I don't know why.
 (set-face-attribute 'default nil :height radian-font-size)
 
+(defun radian--make-font-specs (face font &optional base-specs)
+  (ignore font base-specs)
+  (let* ((base-specs (cadr (assq 'user (get face 'theme-face))))
+         (base-specs (or base-specs '((t nil))))
+         (attrs '(:family :foundry :slant :weight :height :width))
+         (new-specs nil))
+    (dolist (spec base-specs)
+      ;; Each SPEC has the form (DISPLAY ATTRIBUTE-PLIST)
+      (let ((display (car spec))
+            (plist   (copy-tree (nth 1 spec))))
+        ;; Alter only DISPLAY conditions matching this frame.
+        (when (or (memq display '(t default))
+                  (face-spec-set-match-display display nil))
+          (dolist (attr attrs)
+            (setq plist (plist-put plist attr (face-attribute face attr)))))
+        (push (list display plist) new-specs)))
+    (nreverse new-specs)))
+
 (defun radian-init-font-h (&optional reload)
   "Loads `fonts'"
   (if (or reload (daemonp)) (set-frame-font radian-font t t t))
 
-  (apply #'custom-set-faces
-         (let ((attrs '(:weight unspecified :slant unspecified :width unspecified)))
-           (append (when radian-font
-                     `((fixed-pitch ((t (:font ,radian-font ,@attrs))))))
-                   (when radian-serif-font
-                     `((fixed-pitch-serif ((t (:font ,radian-serif-font ,@attrs))))))
-                   (when radian-variable-pitch-font
-                     `((variable-pitch ((t (:font ,radian-variable-pitch-font ,@attrs)))))))))
-  ;; Never save these settings to `custom-file'
-  (dolist (sym '(fixed-pitch fixed-pitch-serif variable-pitch))
-    (put sym 'saved-face nil))
+  (dolist (map `((default . ,radian-font)
+                 (fixed-pitch . ,radian-font)
+                 (fixed-pitch-serif . ,radian-serif-font)
+                 (variable-pitch . ,radian-variable-pitch-font)))
+    (when-let* ((face (car map))
+                (font (cdr map)))
+      (dolist (frame (frame-list))
+        (when (display-multi-font-p frame)
+          (set-face-attribute face frame
+                              :width 'normal :weight 'normal
+                              :slant 'normal :font font)))
+      (let ((new-specs (radian--make-font-specs face font)))
+        ;; Don't save to `customized-face' so it's omitted from `custom-file'
+        ;;(put face 'customized-face new-specs)
+        (custom-push-theme 'theme-face face 'user 'set new-specs)
+        (put face 'face-modified nil))))
 
   (and
    (fboundp 'set-fontset-font)

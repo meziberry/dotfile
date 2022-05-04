@@ -89,7 +89,7 @@ more stability.
   * [Tested on CircleCI](https://circleci.com/gh/raxod502/radian) with
     [Docker] configuration included for all supported Emacs versions
 * [Zsh]
-  * Extremely fast and flexible package manager, [zplugin]
+  * Extremely fast and flexible package manager, [zinit]
   * No-nonsense prompt showing username, hostname, working
     directory, and Git status, colored by exit code
   * Substring completion everywhere
@@ -139,9 +139,9 @@ configuration, and optionally installing local configuration.
 
 * Zsh:
 
-      $ brew install zsh
-      $ mkdir ~/.zplugin
-      $ git clone git@github.com:zdharma/zplugin.git ~/.zplugin/bin
+        $ brew install zsh
+        $ echo $(which zsh) | sudo tee -a /etc/shells
+        $ chfn -s $(which zsh)
 
 * Tmux: `brew install tmux`
 * Git: `brew install git`
@@ -172,8 +172,6 @@ you prefer something different, substitute to taste.
 * Zsh:
 
       $ pacman -S zsh
-      $ mkdir ~/.zplugin
-      $ git clone git@github.com:zdharma/zplugin.git ~/.zplugin/bin
 
 * Tmux: `pacman -S tmux`
 * Git: `pacman -S git`
@@ -330,7 +328,7 @@ commented.
 [which-key]: https://github.com/justbur/emacs-which-key
 [yasnippet]: https://github.com/joaotavora/yasnippet
 [zerodark]: https://github.com/NicolasPetton/zerodark-theme
-[zplugin]: https://github.com/zdharma/zplugin
+[zinit]: https://github.com/zdharma-continuum/zinit
 [zsh-autosuggestions]: https://github.com/zsh-users/zsh-autosuggestions
 [zsh-completions]: https://github.com/zsh-users/zsh-completions
 [zsh-history-substring-search]: https://github.com/zsh-users/zsh-history-substring-search

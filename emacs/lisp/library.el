@@ -108,14 +108,14 @@ at the values with which this function was called."
   "Walk DIRNAME recursively with calling FUNC. Exclude hidden dir."
   (declare (indent defun))
   (cl-labels ((walk (path)
-                (cond
-                 ((file-directory-p path)
-                  (when (and on-directory (funcall test path))
-                    (funcall func path))
-                  (dolist (d (directory-files path t "^[^\\.]"))
-                    (walk d)))
-                 ((and (file-exists-p path) (funcall test path))
-                  (funcall func path)))))
+                    (cond
+                     ((file-directory-p path)
+                      (when (and on-directory (funcall test path))
+                        (funcall func path))
+                      (dolist (d (directory-files path t "^[^\\.]"))
+                        (walk d)))
+                     ((and (file-exists-p path) (funcall test path))
+                      (funcall func path)))))
     (walk dirname)))
 
 ;;;; Sugars
@@ -841,28 +841,132 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
       fn)))
 
 (defmacro spp (form) "Super pp" `(progn (pp ,form) nil))
+(defmacro lpp (lst)
+  "pp list"
+  `(cl-loop for i in ,lst
+            do (princ i) (terpri)
+            finally (return
+                     (let ((v [:length nil :items nil]))
+                       (aset v 1 (length ,lst))
+                       (aset v 3 ,lst)
+                       v))))
 
+;;; Helper & Reference & Log
+(defmacro defhelper (name &rest doc-strings)
+  "Make a helper function of NAME-helper to show the DOC-STRINGS."
+  (let ((fun-name (intern (concat "h/" (symbol-name name))))
+        (doc-string (mapconcat 'identity doc-strings "\n")))
+    `(defun ,fun-name () ,doc-string
+            (interactive)
+            (describe-function ',fun-name))))
+
+(cl-defmacro myc-make-action ((&rest args) &body body)
+  (declare (indent 1))
+  `(lambda ()
+     (interactive)
+     (put 'quit 'error-message "")
+     (run-at-time nil nil
+                  (lambda (,@args)
+                    (put 'quit 'error-message "Quit")
+                    (with-demoted-errors "Error: %S"
+                      ,@body))
+                  ,@(seq-take
+                     `((consult-vertico--candidate)
+                       (minibuffer-contents))
+                     (length args)))
+     (abort-recursive-edit)))
+
+(defmacro defref (name &rest refs)
+  "Make a function of NAME to browse the REFS."
+  (declare (indent defun))
+  (let* ((flatten (cl-loop for item in refs
+                           if (stringp item) collect item
+                           if (listp item) append
+                           (if (stringp (car item))
+                               (cl-loop for r in item collect (eval r))
+                             (list (eval item)))))
+         (consed (if (null flatten) (user-error "No suitable reference.")
+                   (cl-loop for item in flatten
+                            if (string-match "^\\(.*\\): \\(.*\\)$" item) collect
+                            (cons (match-string 2 item) (match-string 1 item))
+                            else collect (cons item nil))))
+         (formatted (cl-loop for item in consed
+                             for ref = (car item)
+                             if (not (string-prefix-p "http" ref)) do
+                             (setq ref (format "https://github.com/%s" ref))
+                             collect (cons ref (cdr item))))
+         (propertized (cl-loop with face = 'font-lock-doc-face
+                               for item in formatted
+                               for label = (cdr item)
+                               if label do
+                               (let ((len (cl-loop for i in formatted if (cdr i) maximize (1+ (length (car i))))))
+                                 (setq label (format (format "%%-%ds (%%s)" len) (car item) label))
+                                 (add-face-text-property (length (car item)) (length label) face nil label))
+                               else do
+                               (setq label (car item))
+                               collect label))
+         (fun (intern (format (concat (unless (string-match-p "/" (symbol-name name)) "r/") (if (cdr flatten) "%s*" "%s")) name))))
+    `(defun ,fun ()
+       ,(format "%s\n\nBrowser/Yank it." propertized)
+       (interactive)
+       (let* ((refs ',propertized)
+              (ref (car (split-string
+                         (minibuffer-with-setup-hook
+                             (lambda ()
+                               (let ((map (make-composed-keymap nil (current-local-map))))
+                                 (define-key map (kbd "M-w")
+                                             (myc-make-action (ref)
+                                               (setq ref (car (split-string ref " ")))
+                                               (kill-new ref)
+                                               (message "Copy REF: %s" ref)))
+                                 (use-local-map map)))
+                           (completing-read "REF: " refs nil t))
+                         " "))))
+         (when (string-match "\\[\\(.+\\)\\]" ref)
+           (setq ref
+                 (string-replace
+                  (match-string 0 ref)
+                  (read-string (format "%s: " (match-string 1 ref)) nil nil (match-string 1 ref))
+                  ref)))
+         (browse-url ref)))))
+
+
 ;;; Wraps of leaf and straight
-(defmacro pow! (name &rest args)
-  "Like `leaf' with :disabled `featurep!'"
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
+(defmacro x (NAME &rest args)
+  "Flags: e/demand s/straight b/blackout i/increment n/loading-nil d/disabled -/ignore."
+  (declare (indent defun))
+  (pcase-let* ((`(,name ,flags) (split-string (symbol-name NAME) "/"))
+               (name (intern name))
+               (doc-strings (cl-loop for i in args until (keywordp i) collect i))
+               (options (cl-set-difference args doc-strings))
+               (refs (prog1 (plist-get options :url) (cl-remf options :url)))
+               (fopts (cl-loop
+                       for (c . p) in
+                       '((?e . (:require t))
+                         (?s . (:straight t))
+                         (?b . (:blackout t))
+                         (?i . (:increment t))
+                         (?n . (:loading nil))
+                         (?d . (:disabled t))
+                         (?m . (:disabled mini-p)))
+                       when (cl-find c flags) append p))
+               (inactive (if (cl-find ?- flags) t nil)))
+    (delq nil
+          `(progn
+             ,(if doc-strings `(defhelp ,name ,@doc-strings))
+             ,(if refs `(defref ,name ,refs))
+             ,(if inactive
+                  ;; still run the first sexp of :init when inactive
+                  ;; `,@(plist-get options :init)
+                  `(leaf ,name :straight
+                     ,(or (plist-get options :straight) (plist-get fopts :straight)))
+                `(leaf ,name ,@options ,@fopts))))))
 
-(defmacro -ow! (name &rest args)
-  "Like `pow!' without :straight."
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args)))
-
-(defmacro pow (name &rest args)
-  "Same to `pow!', but without `:disabled'."
-  (declare (indent 1)) `(leaf ,name ,@args :straight t))
-
-(defalias '-ow #'leaf)
-(put '-ow 'lisp-indent-function 1)
-
-(defmacro --w (name &rest args)
-  "Like `-ow' except :loading is nil"
-  (declare (indent 1)) `(leaf ,name :loading nil ,@args))
+(defmacro w (name &rest args)
+  "Like `x' with :straight t. =(x pkg/s)"
+  (declare (indent defun))
+  (let ((n (symbol-name name)))
+    `(x ,(intern (concat `,n (if (cl-find ?/ `,n) "s" "/s"))) ,@args)))
 
 (defalias 'sup #'straight-use-package)
 (defalias '-key 'leaf-key)

@@ -13,7 +13,7 @@
   "Determine using the LIGHT or the DARK color of theme."
   (if (eq theme-light/dark 'light) light dark))
 
-(-ow modus-themes
+(x modus-themes
   :init
   (setq modus-themes-vivendi-color-overrides
         '((bg-main . "#2E3440"))
@@ -126,7 +126,7 @@
           (t . (rainbow 1)))))
 
 (eval-unless! "prefer modus"
-(-ow nano-theme
+(x nano-theme
   :straight `(nano-theme :local-repo ,(-contrib/ "nano-theme/") :type nil :build (:not compile))
   :custom
   (nano-theme-padded-modeline . nil)

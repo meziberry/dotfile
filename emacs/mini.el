@@ -966,28 +966,121 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
       fn)))
 
 (defmacro spp (form) "Super pp" `(progn (pp ,form) nil))
+(defmacro defhelper (name &rest doc-strings)
+  "Make a helper function of NAME-helper to show the DOC-STRINGS."
+  (let ((fun-name (intern (concat "h/" (symbol-name name))))
+        (doc-string (mapconcat 'identity doc-strings "\n")))
+    `(defun ,fun-name () ,doc-string
+            (interactive)
+            (describe-function ',fun-name))))
 
+(cl-defmacro myc-make-action ((&rest args) &body body)
+  (declare (indent 1))
+  `(lambda ()
+     (interactive)
+     (put 'quit 'error-message "")
+     (run-at-time nil nil
+                  (lambda (,@args)
+                    (put 'quit 'error-message "Quit")
+                    (with-demoted-errors "Error: %S"
+                      ,@body))
+                  ,@(seq-take
+                     `((consult-vertico--candidate)
+                       (minibuffer-contents))
+                     (length args)))
+     (abort-recursive-edit)))
+
+(defmacro defref (name &rest refs)
+  "Make a function of NAME to browse the REFS."
+  (declare (indent defun))
+  (let* ((flatten (cl-loop for item in refs
+                           if (stringp item) collect item
+                           if (listp item) append
+                           (if (stringp (car item))
+                               (cl-loop for r in item collect (eval r))
+                             (list (eval item)))))
+         (consed (if (null flatten) (user-error "No suitable reference.")
+                   (cl-loop for item in flatten
+                            if (string-match "^\\(.*\\): \\(.*\\)$" item) collect
+                            (cons (match-string 2 item) (match-string 1 item))
+                            else collect (cons item nil))))
+         (formatted (cl-loop for item in consed
+                             for ref = (car item)
+                             if (not (string-prefix-p "http" ref)) do
+                             (setq ref (format "https://github.com/%s" ref))
+                             collect (cons ref (cdr item))))
+         (propertized (cl-loop with face = 'font-lock-doc-face
+                               for item in formatted
+                               for label = (cdr item)
+                               if label do
+                               (let ((len (cl-loop for i in formatted if (cdr i) maximize (1+ (length (car i))))))
+                                 (setq label (format (format "%%-%ds (%%s)" len) (car item) label))
+                                 (add-face-text-property (length (car item)) (length label) face nil label))
+                               else do
+                               (setq label (car item))
+                               collect label))
+         (fun (intern (format (concat (unless (string-match-p "/" (symbol-name name)) "r/") (if (cdr flatten) "%s*" "%s")) name))))
+    `(defun ,fun ()
+       ,(format "%s\n\nBrowser/Yank it." propertized)
+       (interactive)
+       (let* ((refs ',propertized)
+              (ref (car (split-string
+                         (minibuffer-with-setup-hook
+                             (lambda ()
+                               (let ((map (make-composed-keymap nil (current-local-map))))
+                                 (define-key map (kbd "M-w")
+                                             (myc-make-action (ref)
+                                               (setq ref (car (split-string ref " ")))
+                                               (kill-new ref)
+                                               (message "Copy REF: %s" ref)))
+                                 (use-local-map map)))
+                           (completing-read "REF: " refs nil t))
+                         " "))))
+         (when (string-match "\\[\\(.+\\)\\]" ref)
+           (setq ref
+                 (string-replace
+                  (match-string 0 ref)
+                  (read-string (format "%s: " (match-string 1 ref)) nil nil (match-string 1 ref))
+                  ref)))
+         (browse-url ref)))))
+
+
 ;;; Wraps of leaf and straight
-(defmacro pow! (name &rest args)
-  "Like `leaf' with :disabled `featurep!'"
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args :straight t)))
+(defmacro x (NAME &rest args)
+  "Flags: e/demand s/straight b/blackout i/increment n/loading-nil d/disabled -/ignore."
+  (declare (indent defun))
+  (pcase-let* ((`(,name ,flags) (split-string (symbol-name NAME) "/"))
+               (name (intern name))
+               (doc-strings (cl-loop for i in args until (keywordp i) collect i))
+               (options (cl-set-difference args doc-strings))
+               (refs (prog1 (plist-get options :url) (cl-remf options :url)))
+               (fopts (cl-loop
+                       for (c . p) in
+                       '((?e . (:require t))
+                         (?s . (:straight t))
+                         (?b . (:blackout t))
+                         (?i . (:increment t))
+                         (?n . (:loading nil))
+                         (?d . (:disabled t))
+                         (?m . (:disabled mini-p)))
+                       when (cl-find c flags) append p))
+               (inactive (if (cl-find ?- flags) t nil)))
+    (delq nil
+          `(progn
+             ,(if doc-strings `(defhelp ,name ,@doc-strings))
+             ,(if refs `(defref ,name ,refs))
+             ,(if inactive
+                  ;; still run the first sexp of :init when inactive
+                  ;; `,@(plist-get options :init)
+                  `(leaf ,name :straight
+                     ,(or (plist-get options :straight) (plist-get fopts :straight)))
+                `(leaf ,name ,@options ,@fopts))))))
 
-(defmacro -ow! (name &rest args)
-  "Like `pow!' without :straight."
-  (declare (indent 1))
-  `(unless mini-p (leaf ,name :disabled (not (featurep! ',name)) ,@args)))
-
-(defmacro pow (name &rest args)
-  "Same to `pow!', but without `:disabled'."
-  (declare (indent 1)) `(leaf ,name ,@args :straight t))
-
-(defalias '-ow #'leaf)
-(put '-ow 'lisp-indent-function 1)
-
-(defmacro --w (name &rest args)
-  "Like `-ow' except :loading is nil"
-  (declare (indent 1)) `(leaf ,name :loading nil ,@args))
+(defmacro w (name &rest args)
+  "Like `x' with :straight t. =(x pkg/s)"
+  (declare (indent defun))
+  (let ((n (symbol-name name)))
+    `(x ,(intern (concat `,n (if (cl-find ?/ `,n) "s" "/s"))) ,@args)))
 
 (defalias 'sup #'straight-use-package)
 (defalias '-key 'leaf-key)
@@ -1357,7 +1450,7 @@ binding the variable dynamically over the entire init-file."
 (sup 'leaf)
 (sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz"))
 
-(-ow leaf-keywords
+(x leaf-keywords
   :require t
   :bind (radian-comma-keymap ("lf" . leaf-find))
   :config
@@ -1438,7 +1531,7 @@ binding the variable dynamically over the entire init-file."
   (leaf-keywords-init))
 
 ;; el-patch
-(pow el-patch :custom (el-patch-enable-use-package-integration . nil))
+(w el-patch :custom (el-patch-enable-use-package-integration . nil))
 ;; Only needed at compile time, thanks to Jon
 ;; <https://github.com/raxod502/el-patch/pull/11>.
 (eval-when-compile (require 'el-patch))
@@ -1446,7 +1539,7 @@ binding the variable dynamically over the entire init-file."
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
 ;;       Here :package imply `eval-after-load'.
 ;;      :bind-keymap imply `require' leaf--name.
-(--w leaf
+(x leaf/n
   :init
   (plist-put leaf-system-defaults :leaf-defun nil)
   (plist-put leaf-system-defaults :leaf-defvar nil)
@@ -1464,16 +1557,16 @@ If PKG passed, require PKG before binding."
 ;; Package `no-littering' changes the default paths for lots of
 ;; different packages, with the net result that the ~/.emacs.d folder
 ;; is much more clean and organized.
-(pow no-littering
+(w no-littering
   :pre-setq
   (no-littering-etc-directory . *etc/*)
   (no-littering-var-directory . *cache/*)
   :require t)
 
-(pow blackout)
+(w blackout)
 
 ;;;; Meow
-(pow meow
+(w meow
   :straight (meow :repo "meow-edit/meow" :branch "master")
   :require t
   :chord (meow-normal-state-keymap (".." . meow-bounds-of-thing))
@@ -1591,7 +1684,7 @@ into `regexp-search-ring'"
   (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode meow-beacon-mode))
 
 ;;;; gcmh-mode
-(pow gcmh :blackout t)
+(w gcmh :blackout t)
 
 
 ;; File+dir local variables are initialized after the major mode and its hooks
@@ -1613,7 +1706,7 @@ into `regexp-search-ring'"
   (unless enable-local-variables (radian-run-local-var-hooks-h)))
 
 ;;;; Incremental lazy-loading
-(--w incremental
+(x incremental/n
   :config
   ;; Incrementally
   (defvar radian-incremental-packages '(t)
@@ -1690,7 +1783,7 @@ If this is a daemon session, load them all immediately instead."
                              (cdr radian-incremental-packages) t)))))
 
 ;;;; After-call  SYMBOLS | HOOKS
-(--w aftercall
+(x aftercall/n
   :config
   (defvar radian--deferred-packages-alist '(t))
 
@@ -1927,7 +2020,7 @@ This is a function for `after-save-hook'. Remove
 ;; Feature `saveplace' provides a minor mode for remembering the
 ;; location of point in each file you visit, and returning it there
 ;; when you find the file again.
-(-ow saveplace
+(x saveplace
   :config
   (save-place-mode +1)
 
@@ -1970,7 +2063,7 @@ This is a function for `after-save-hook'. Remove
                     (not (or (numberp key) (null key))))))
            [C-i] [?\C-i])))
 
-(pow key-chord
+(w key-chord
   :config
   (fn-quiet! #'key-chord-mode +1)
   (setq key-chord-two-keys-delay 0.25))
@@ -2197,7 +2290,7 @@ convert\" UTF8_STRING)'. Disable that."
 ;; rather a whole sequence of them.) For instance, you can use C-x 1
 ;; to focus on a particular window, then return to your previous
 ;; layout with C-c left.
-(-ow winner
+(x winner
   ;; undo/redo changes to Emacs' window layout
   :preface (defvar winner-dont-bind-my-keys t) ; I'll bind keys myself
   :hook radian-first-buffer-hook
@@ -2307,7 +2400,7 @@ active minibuffer, even if the minibuffer is not selected."
 
 
 ;; Package `swsw' provides lightway to navigate windows.
-(-ow swsw
+(x swsw
   :straight (swsw :repo "https://git.sr.ht/~dsemy/swsw")
   :hook (radian-first-input-hook . swsw-mode)
   :chord (",," . swsw-select)
@@ -2421,7 +2514,7 @@ Return nil when horizontal scrolling has moved it off screen."
 ;; S-down to move between windows. This is much more convenient and
 ;; efficient than using the default binding, C-x o, to cycle through
 ;; all of them in an essentially unpredictable order.
-(-ow windmove
+(x windmove
   ;; Avoid using `windmove-default-keybindings' due to
   ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=50430.
   :bind
@@ -2432,7 +2525,7 @@ Return nil when horizontal scrolling has moved it off screen."
 
 ;; Feature `ibuffer' provides a more modern replacement for the
 ;; `list-buffers' command.
-(-ow ibuffer
+(x ibuffer
   :bind (([remap list-buffers] . ibuffer))
   :config
   (setq ibuffer-expert t)
@@ -2477,7 +2570,7 @@ ourselves."
     input))
 
 ;;;; Complation supported by `vertico'
-(-ow vertico
+(x vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
   :bind (radian-comma-keymap ("&" . vertico-repeat))
@@ -2505,7 +2598,7 @@ overrides `completion-styles' during company completion sessions.")
   (-key "DEL" #'vertico-directory-delete-char 'vertico-map)) ;backspace key
 
 ;;;; Orderless
-(pow orderless
+(w orderless
   :aftercall radian-first-input-hook
   :config
   (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
@@ -2549,7 +2642,7 @@ orderless."
   (set-face-attribute 'completions-first-difference nil :inherit nil))
 
 ;;;; isearch
-(-ow isearch
+(x isearch
   :init
   (defun consult-line-or-visit-p ()
     (<= (buffer-size)
@@ -2589,7 +2682,7 @@ orderless."
 ;; Feature `auth-source' reads and writes secrets from files like
 ;; ~/.netrc for TRAMP and related packages, so for example you can
 ;; avoid having to type in a particular host's password every time.
-(-ow auth-source
+(x auth-source
   :config
   ;; Emacs stores `authinfo' in $HOME and in plain-text. Let's not do that, mkay?
   ;; This file stores usernames, passwords, and other such treasures for the
@@ -2673,7 +2766,7 @@ permission."
 (-key* "s-x" #'radian-set-executable-permission)
 
 ;;;; recentf-mode
-(-ow recentf
+(x recentf
   :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
   :increment easymenu tree-widget timer
   :custom
@@ -2814,7 +2907,7 @@ newline."
 ;; Feature `whitespace' provides a minor mode for highlighting
 ;; whitespace in various special ways.
 ;;;; Whitespace
-(-ow whitespace
+(x whitespace
   :init
   (defun radian-highlight-non-default-indentation-h ()
     "Highlight whitespace at odds with `indent-tabs-mode'.
@@ -2891,11 +2984,11 @@ invocation will kill the newline."
 ;; will be deleted rather than killed. (Otherwise, in both cases the
 ;; selection is deselected and the normal function of the key is
 ;; performed.)
-(-ow delsel :config (delete-selection-mode -1))
+(x delsel :config (delete-selection-mode -1))
 
 ;;;; Undo/redo
 
-(-ow repeat
+(x repeat
   :init
   (defvar radian-repeat-exclude-commands
     '(meow-next meow-prev meow-left meow-right meow-block meow-line)
@@ -2909,7 +3002,7 @@ invocation will kill the newline."
         (setq last-repeatable-command repeat-previous-repeated-command))))
 
 ;; Feature `warnings' allows us to enable and disable warnings.
-(-ow warnings
+(x warnings
   :require t
   :config
   ;; Ignore the warning we get when a huge buffer is reverted and the
@@ -2918,7 +3011,7 @@ invocation will kill the newline."
 
 ;; Feature `bookmark' provides a way to mark places in a buffer. I
 ;; don't use it, but some other packages do.
-(-ow bookmark
+(x bookmark
   :config
 
   (dolist (func '(bookmark-load bookmark-write-file))
@@ -2926,7 +3019,7 @@ invocation will kill the newline."
 
 
 ;;;; `cua' rectangle edit
-(-ow cua-base
+(x cua-base
   :init (cua-selection-mode t)
   ;; disable `delete-selection-mode'
   :custom (cua-delete-selection . nil))
@@ -2947,7 +3040,7 @@ invocation will kill the newline."
         (set-window-configuration radian--ediff-saved-wconf)))))
 
 ;;;; server
-(-ow server
+(x server
   :when (display-graphic-p)
   :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
@@ -2958,7 +3051,7 @@ invocation will kill the newline."
     (server-start)))
 
 ;;;; tramp
-(-ow tramp
+(x tramp
   :init
   (unless *WINDOWS
     (setq tramp-default-method "ssh")) ; faster than the default scp
@@ -2971,7 +3064,7 @@ invocation will kill the newline."
                                      "[/\\\\]node_modules")))
 
 ;;;; so-long
-(-ow so-long
+(x so-long
   :hook (radian-first-file-hook . global-so-long-mode)
   :config
   ;; Emacs 29 introduced faster long-line detection, so they can afford a much
@@ -3021,7 +3114,7 @@ invocation will kill the newline."
               smartparens-strict-mode)))
 
 ;;;; prettify
-(-ow prog-mode
+(x prog-mode
   :init
   (defvar +ligatures-extras-in-modes t
     "List of major modes where extra ligatures should be enabled.
@@ -3071,7 +3164,7 @@ and cannot run in."
   ;; (setq prettify-symbols-unprettify-at-point 'right-edge)
   (global-prettify-symbols-mode +1))
 
-(-ow autorevert
+(x autorevert
   :init
   (defun radian--autorevert-silence ()
     "Silence messages from `auto-revert-mode' in the current buffer."
@@ -3123,7 +3216,7 @@ and cannot run in."
 
   :blackout auto-revert-mode)
 
-(-ow paren
+(x paren
   ;; highlight matching delimiters
   :hook (radian-first-buffer-hook . show-paren-mode)
   :config
@@ -3132,7 +3225,7 @@ and cannot run in."
         show-paren-when-point-inside-paren t
         show-paren-when-point-in-periphery t))
 
-(-ow apheleia
+(x apheleia
   :straight (apheleia :host github :repo "raxod502/apheleia")
   :init
 
@@ -3151,9 +3244,9 @@ and cannot run in."
 
   :blackout t)
 
-(-ow abbrev :blackout t)
+(x abbrev :blackout t)
 
-(-ow xref
+(x xref
   :custom
   (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
@@ -3188,7 +3281,7 @@ and cannot run in."
 ;; Company allows for multiple frontends to display the candidates,
 ;; such as a tooltip menu. Company stands for "Complete Anything".
 
-(-ow eldoc
+(x eldoc
   :require t
   :config
 
@@ -3231,14 +3324,14 @@ was printed, and only have ElDoc display if one wasn't."
 
   :blackout t)
 
-(-ow lisp-mode
+(x lisp-mode
   :bind
   ([remap eval-expression] . pp-eval-expression)
   :init
   (add-to-list 'safe-local-variable-values
                '(lisp-indent-function . common-lisp-indent-function)))
 
-(-ow cc-mode
+(x cc-mode
 
   :defer-config
 
@@ -3280,7 +3373,7 @@ was printed, and only have ElDoc display if one wasn't."
          ("rc\\'" . conf-mode)
          ("\\.\\(?:hex\\|nes\\)\\'" . hexl-mode)))
 
-(-ow help
+(x help
   :bind
   ;; Aviod visiting HELLO file accidentally.
   ("C-h h" . nil)
@@ -3311,7 +3404,7 @@ Otherwise, it will try to find a TAGS file using etags, which is
 unhelpful."
       (add-hook 'xref-backend-functions #'elisp--xref-backend nil 'local))))
 
-(-ow elisp-mode
+(x elisp-mode
   :config
   (defun radian/headerise-elisp ()
     "Add minimal header and footer to an elisp buffer in order to placate flycheck."
@@ -3356,7 +3449,7 @@ unhelpful."
         ("C-h C-o" . describe-symbol)
         ("C-h C-e" . view-echo-area-messages)))
 
-(-ow checkdoc
+(x checkdoc
   :init
   ;; Not sure why this isn't included by default.
   (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
@@ -3370,7 +3463,7 @@ unhelpful."
   ;; doesn't know the variable is safe.
   (put 'elisp-lint-indent-specs 'safe-local-variable #'listp))
 
-(-ow dired
+(x dired
   ;; This binding is way nicer than ^. It's inspired by
   ;; Sunrise Commander.
   :bind (dired-mode-map ("J" . dired-up-directory))
@@ -3434,7 +3527,7 @@ the problematic case.)"
   ;; function.)
   (setq dired-auto-revert-buffer #'dired-buffer-stale-p))
 
-(-ow dired-x
+(x dired-x
   :bind (;; Bindings for jumping to the current directory in Dired.
          ("C-x C-j" . dired-jump)
          ("C-x 4 C-j" . dired-jump-other-window))
@@ -3451,10 +3544,10 @@ This advice is only activated on macOS, where it is helpful since
 most of the Linux utilities in `dired-guess-shell-alist-default'
 are probably not going to be installed."
       :override #'dired-guess-default)))
-(-ow find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
+(x find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
 
-(-ow smerge-mode :blackout t)
-(-ow pixel-scroll :emacs> 29 :init (pixel-scroll-precision-mode +1))
+(x smerge-mode :blackout t)
+(x pixel-scroll :emacs> 29 :init (pixel-scroll-precision-mode +1))
 
 (appendq! initial-frame-alist
           '((tool-bar-lines . 0)
@@ -3682,7 +3775,7 @@ spaces."
 ;;; Shutdown
 ;; Package `restart-emacs' provides an easy way to restart Emacs from
 ;; inside of Emacs, both in the terminal and in windowed mode.
-(pow restart-emacs
+(w restart-emacs
 
   :init
   (defun radian-really-kill-emacs ()
@@ -3895,7 +3988,7 @@ If RETURN-P, return the message as a string instead of displaying it."
              (float-time (time-subtract (current-time) before-init-time))))))
 
 ;;;; simple
-(-ow simple
+(x simple
   :bind
   ("C-x C-M-t" . transpose-regions)
   (([remap default-indent-new-line] . radian-continue-comment))
@@ -3920,7 +4013,7 @@ two inserted lines are the same."
       (default-indent-new-line))))
 
 ;;;; savehist for session
-(-ow savehist
+(x savehist
   ;; persist variables across sessions
   :increment custom
   :hook radian-first-input-hook
@@ -4065,7 +4158,7 @@ font to that size. It's rarely a good idea to do so!")
   "Determine using the LIGHT or the DARK color of theme."
   (if (eq theme-light/dark 'light) light dark))
 
-(-ow modus-themes
+(x modus-themes
   :init
   (setq modus-themes-vivendi-color-overrides
         '((bg-main . "#2E3440") (fg-unfocused . "#ECEFF4")))
