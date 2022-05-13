@@ -72,6 +72,7 @@ setting the DEBUG envvar will enable this at startup.")
                               (file-name-directory
                                (file-truename radian-local-init-file))))
   "Path to the emacs local configuration Git repository.")
+(defsubst -local/ (&rest string) (apply #'concat *local-directory* string))
 
 (defconst *radian-contrib/* (concat *radian-directory* "emacs/contrib/")
   "Radian contrib directory for manual third-party packages")
@@ -111,13 +112,13 @@ dependencies or long-term shared data. Must end with a slash.")
 (defgroup radian-hooks nil
   "Startup hooks for Radian Emacs."
   :group 'radian
-  :link '(url-link :tag "GitHub" "https://github.com/raxod502"))
+  :link '(url-link :tag "GitHub" "https://github.com/radian-software"))
 
 (defgroup radian nil
   "Customize your Radian Emacs experience."
   :prefix "radian-"
   :group 'emacs
-  :link '(url-link :tag "GitHub" "https://github.com/raxod502"))
+  :link '(url-link :tag "GitHub" "https://github.com/radian-software"))
 
 (defcustom radian-first-input-hook nil
   "Transient hooks run before the first user input."
@@ -231,7 +232,10 @@ KEY-NAME, COMMAND, and PREDICATE are as in `-key'."
 (require 'cl-lib)
 (require 'map)
 (require 'subr-x)
-(req! library)
+(req! lib)
+
+;; Push contrib/ dir int load-patch
+(cl-pushnew *radian-contrib/* load-path)
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages nil
@@ -811,7 +815,7 @@ binding the variable dynamically over the entire init-file."
 ;; el-patch
 (w el-patch :custom (el-patch-enable-use-package-integration . nil))
 ;; Only needed at compile time, thanks to Jon
-;; <https://github.com/raxod502/el-patch/pull/11>.
+;; <https://github.com/radian-software/el-patch/pull/11>.
 (eval-when-compile (require 'el-patch))
 
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
@@ -841,6 +845,8 @@ If PKG passed, require PKG before binding."
 
 ;; REVIEW: let the obsolete warning shutup.
 (advice-add 'with-demoted-errors :around #'fn-quiet!)
+
+(w all-the-icons)
 
 ;;;; Meow
 (x meow
@@ -900,11 +906,11 @@ into `regexp-search-ring'"
   (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode meow-beacon-mode))
 
 ;;; MODULE {Radian-foundation}
-;; autoloads
-(sup `(radian-autoload :local-repo ,(concat *radian-directory* "emacs/autoload")
-                       :type nil :build (:not compile)))
-(sup `(local-autoload :local-repo ,(concat *local-directory* "emacs/autoload")
-                      :type nil :build (:not compile)))
+;; Autoload files
+(sup `(rautol
+       :local-repo ,(-radian/ "emacs/autoload") :type nil :build (:not compile)))
+(sup `(lautol
+       :local-repo ,(-local/ "emacs/autoload") :type nil :build (:not compile)))
 
 ;;;; gcmh-mode
 (w gcmh/b)
@@ -1348,7 +1354,7 @@ unquote it using a comma."
 (radian-register-dotfile
  ,(expand-file-name "emacs/radian.el" *radian-directory*)
  "e r")
-(radian-register-dotfile ,(-lisp/ "library.el") "e b")
+(radian-register-dotfile ,(-lisp/ "lib.el") "e b")
 (radian-register-dotfile
  ,(expand-file-name "straight/versions/radian.el" user-emacs-directory)
  "e v" "radian-versions-el")
@@ -1404,8 +1410,7 @@ unquote it using a comma."
 ;; atrocious uptime (namely, the entire service will just go down for
 ;; more than a day at a time on a regular basis). Unacceptable because
 ;; it keeps breaking Radian CI.
-(unless mini-p
-  (sup '(org :host github :repo "emacs-straight/org-mode" :files (:defaults "etc"))))
+(unless mini-p (sup '(org :host github :repo "emacs-straight/org-mode")))
 
 ;;
 ;;;; Keybinds
@@ -2166,7 +2171,6 @@ orderless."
 
 ;;;; Consult
 (w consult
-
   :preface
   (w consult-dir/m
     :after vertico consult
@@ -2204,7 +2208,7 @@ orderless."
   (defadvice! +vertico--consult-recent-file-a (&rest _args)
     "`consult-recent-file' needs to have `recentf-mode' on to work correctly"
     :before #'consult-recent-file
-    (recentf-mode +1))
+    (fn-quiet! #'recentf-mode +1))
 
   (setq consult-project-function #'radian-project-root
         consult-narrow-key "<"
@@ -2242,12 +2246,13 @@ orderless."
               :state    ,#'consult--buffer-state
               :items    ,(lambda () (mapcar #'buffer-name (org-buffer-list)))))
     (add-to-list 'consult-buffer-sources '+vertico--consult-org-source 'append))
-
-  (-keys (consult-crm-map
-          ([tab]     . +vertico/crm-select)
-          ([backtab] . +vertico/crm-select-keep-input)
-          ([return]  . +vertico/crm-exit)
-          ("RET"     . +vertico/crm-exit))))
+  ;; DEPRECATED: consult-crm-map
+  ;; (-keys (consult-crm-map
+  ;;         ([tab]     . +vertico/crm-select)
+  ;;         ([backtab] . +vertico/crm-select-keep-input)
+  ;;         ([return]  . +vertico/crm-exit)
+  ;;         ("RET"     . +vertico/crm-exit)))
+  )
 
 ;;;; Embark
 (x embark
@@ -2377,8 +2382,13 @@ DIRS."
   (defun +project--try-local (dir)
     "Determine if DIR is a non-Git project.
 DIR must include a .project file to be considered a project."
-    (let ((root (locate-dominating-file dir ".project")))
-      (and root (cons 'local root))))
+    (catch 'ret
+      (let ((flags '((".project")
+                     ("Makefile" "README.org" "README.md"))))
+        (dolist (level flags)
+          (dolist (f level)
+            (when-let ((root (locate-dominating-file dir f)))
+              (throw 'ret (cons 'local root))))))))
 
   :defer-config
   (add-hook 'project-find-functions #'+project--try-local))
@@ -2480,18 +2490,16 @@ permission."
 
 ;;;; recentf-mode
 (x recentf
-  :hook (radian-first-file-hook . (lambda () (fn-quiet! #'recentf-mode)))
   :increment easymenu tree-widget timer
+  :commands recentf-open-files
+  :setq-default (history-length . 100)
   :custom
   (recentf-max-saved-items . 100)
   (recentf-exclude . '(".gz" ".xz" ".zip" "/elpa/" "/ssh:" "/sudo:"))
   ;; The most sensible time to clean up your recent files list is when you quit
   ;; Emacs (unless this is a long-running daemon session).
-  `(recentf-auto-cleanup . ,(if (daemonp) 300 nil))
-  :commands recentf-open-files
-  ;; Set history-length longer
-  :setq-default (history-length . 100)
-  :config (add-hook 'kill-emacs-hook (lambda () (fn-quiet! #'recentf-cleanup))))
+  `(recentf-auto-cleanup . ,(if (daemonp) 300 "11:00pm"))
+  :config (advice-add #'recentf-save-list :around #'fn-quiet!))
 
 ;;; MODULE {Editing}
 ;;;; Text formatting
@@ -3107,7 +3115,7 @@ and cannot run in."
 ;; applying code formatters asynchronously on save without moving
 ;; point or modifying the scroll position.
 (x apheleia/b
-  :straight (apheleia :host github :repo "raxod502/apheleia")
+  :straight (apheleia :host github :repo "radian-software/apheleia")
   :init
 
   (apheleia-global-mode +1)
@@ -3458,10 +3466,10 @@ server getting expensively restarted when reverting buffers."
              (if (numberp +lsp-defer-shutdown) +lsp-defer-shutdown 3)
              nil (lambda (workspace)
                    (with-lsp-workspace workspace
-                     (unless (lsp--workspace-buffers workspace)
-                       (let ((lsp-restart 'ignore))
-                         (funcall fn))
-                       (+lsp-optimization-mode -1))))
+                                       (unless (lsp--workspace-buffers workspace)
+                                         (let ((lsp-restart 'ignore))
+                                           (funcall fn))
+                                         (+lsp-optimization-mode -1))))
              lsp--cur-workspace))))
 
   (add-hook! 'kill-emacs-hook
@@ -4932,10 +4940,11 @@ REPORT-PROGRESS non-nil (or interactively) means to print more
 messages."
     (interactive (list 'report-progress))
     (cl-block nil
-      (unless (cl-some (lambda (f)
-                         (file-newer-than-file-p f (concat radian-lib-file "c")))
-                       (append (list radian-lib-file)
-                               (directory-files *radian-lisp/* t ".+\\.el")))
+      (unless (cl-some
+               (lambda (f)
+                 (file-newer-than-file-p f (concat radian-lib-file "c")))
+               (append (list radian-lib-file)
+                       (directory-files *radian-lisp/* t ".+\\.el")))
         (when report-progress
           (message "Byte-compiled configuration already up to date"))
         (cl-return))
@@ -5000,7 +5009,7 @@ messages."
   org-macro ob org org-agenda org-capture
 
   :init
-  (req! -org)
+  (req! org)
   (setq org-use-property-inheritance t   ; it's convenient to have properties inherited
         org-log-done 'time               ; having the time a item is done sounds convininet
         org-re-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js")
@@ -5083,7 +5092,7 @@ messages."
   ;; functionality, which allows for collating TODO items from your Org
   ;; files into a single buffer.
   (x org-agenda/m
-
+    :custom (org-agenda-restore-windows-after-quit . t)
     :config
 
     (defadvice! radian--advice-org-agenda-default-directory
@@ -5172,10 +5181,11 @@ be invoked before `org-mode-hook' is run."
 
 
 ;;;; Roam
-
 (x org-roam/m
   :straight (org-roam :host github :repo "org-roam/org-roam" :files (:defaults "extensions/*"))
   :preface
+  (w emacsql-sqlite-builtin)
+
   ;; Set this to nil so we can later detect if the user has set custom values
   ;; for these variables. If not, default values will be set in the :config
   ;; section.
@@ -5206,6 +5216,9 @@ of org-mode to properly utilize ID links.")
         ;; Reverse the default to favor faster searchers over slower ones.
         org-roam-list-files-commands '(fd rg fdfind find))
 
+  :custom
+  (org-roam-database-connector . 'sqlite-builtin)
+  (org-roam-file-exclude-regexp . nil)
   :increment
   ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
   :init/el-patch
@@ -5318,8 +5331,7 @@ non-nil value to enable trashing for file operations."
   (osx-trash-setup))
 
 ;;;;; Dired
-(w dirvish/md
-  :increment t
+(w dirvish/imd
   :hook (radian-first-file-hook . dirvish-override-dired-mode)
   :custom (dirvish-async-listing-threshold . 10000)
   :setq (dirvish--debouncing-delay . 1)
@@ -6266,77 +6278,9 @@ turn it off again after creating the first frame."
 (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
 
 ;;;; Fonts
-(req! -font)
-
-;;;; Mode line
-(x recursion-indicator/m
-  :straight (recursion-indicator :host github :repo "minad/recursion-indicator")
-  :custom (recursion-indicator-minibuffer . "◀")
-  :init (recursion-indicator-mode +1))
-
-;; Normally the buffer name is right-padded with whitespace until it
-;; is at least 12 characters. This is a waste of space, so we
-;; eliminate the padding here. Check the docstrings for more
-;; information.
-(setq-default mode-line-buffer-identification
-              (propertized-buffer-identification "%b"))
-
-;; Make `mode-line-position' show the column, not just the row.
-(column-number-mode +1)
-
-;; https://emacs.stackexchange.com/a/7542/12534
-(defun radian--mode-line-align (left right)
-  "Render a left/right aligned string for the mode line.
-LEFT and RIGHT are strings, and the return value is a string that
-displays them left- and right-aligned respectively, separated by
-spaces."
-  (let ((width (- (window-total-width) (length left))))
-    (format (format "%%s%%%ds" width) left right)))
-
-;; <https://github.com/minad/recursion-indicator>
-;; remove the default recursion indicator
-(cl-loop with index = 0
-         for e in mode-line-modes do
-         (cond ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
-                (setf (nth index mode-line-modes) ""))
-               ((equal "(" e) (setf (nth index mode-line-modes) "["))
-               ((equal ")" e) (setf (nth index mode-line-modes) "]")))
-         (setq index (1+ index)))
-
-(defcustom radian-mode-line-left
-  '(""
-    (:propertize ("" mode-line-mule-info) display (min-width (5.0)))
-    "%*" "%@"
-    " "     ;; Show the name of the current buffer.
-    mode-line-buffer-identification
-    mode-line-front-space
-    ;; Show the row and column of point.
-    mode-line-position
-    ;; Show the active major and minor modes.
-    " "
-    mode-line-modes
-    mode-line-misc-info)
-  "Composite mode line construct to be shown left-aligned."
-  :type 'sexp)
-
-(defcustom radian-mode-line-right          ;⊙_⚆⚈☭
-  '("%e"
-    (vc-mode vc-mode)
-    " "
-    (:eval (when (featurep 'meow) (meow-indicator)))
-    mode-line-end-spaces)
-  "Composite mode line construct to be shown right-aligned."
-  :type 'sexp)
-
-;; Actually reset the mode line format to show all the things we just
-;; defined.
-(setq-default mode-line-format
-              '(:eval (replace-regexp-in-string
-                       "%" "%%"
-                       (radian--mode-line-align
-                        (format-mode-line radian-mode-line-left)
-                        (format-mode-line radian-mode-line-right))
-                       'fixedcase 'literal)))
+(req! font)
+;;;; mode-line
+(require 'r-modeline)
 
 ;;;; Formfeed display.
 (defun xah-insert-formfeed ()
@@ -6367,7 +6311,46 @@ spaces."
 ;;; Shutdown
 ;; Package `restart-emacs' provides an easy way to restart Emacs from
 ;; inside of Emacs, both in the terminal and in windowed mode.
-(w restart-emacs/e
+(w restart-emacs
+  :commands restart-emacs--ensure-can-restart
+  :init/el-patch
+  (defun restart-emacs (&optional args)
+    "Restart Emacs.
+
+When called interactively ARGS is interpreted as follows
+
+- with a single `universal-argument' (`C-u') Emacs is restarted
+  with `--debug-init' flag
+- with two `universal-argument' (`C-u') Emacs is restarted with
+  `-Q' flag
+- with three `universal-argument' (`C-u') the user prompted for
+  the arguments
+
+When called non-interactively ARGS should be a list of arguments
+with which Emacs should be restarted."
+    (interactive "P")
+    ;; Do not trigger a restart unless we are sure, we can restart emacs
+    (restart-emacs--ensure-can-restart)
+    ;; We need the new emacs to be spawned after all kill-emacs-hooks
+    ;; have been processed and there is nothing interesting left
+    (let* ((default-directory (restart-emacs--guess-startup-directory))
+           (translated-args (if (called-interactively-p 'any)
+                                (restart-emacs--translate-prefix-to-args args)
+                              args))
+           (restart-args (append translated-args
+                                 ;; When Emacs is started with a -Q
+                                 ;; restart-emacs's autoloads would not be present
+                                 ;; causing the the --restart-emacs-desktop
+                                 ;; argument to be unhandled
+                                 (unless (member "-Q" translated-args)
+                                   (restart-emacs--frame-restore-args))))
+           (kill-emacs-hook (append kill-emacs-hook
+                                    (unless restart-emacs--inhibit-kill-p
+                                      (list (apply-partially #'restart-emacs--launch-other-emacs
+                                                             restart-args))))))
+      (if restart-emacs--inhibit-kill-p
+          (restart-emacs--launch-other-emacs restart-args)
+        (save-buffers-kill-emacs))))
   :init
   (defun radian-really-kill-emacs ()
     "Kill Emacs immediately, bypassing `kill-emacs-hook'."
@@ -6433,9 +6416,7 @@ bound dynamically before being used.")
           (let ((cursor-in-echo-area t))
             (when minibuffer-auto-raise
               (raise-frame (window-frame (minibuffer-window))))
-            (setq key
-                  (read-key (propertize prompt
-                                        'face 'minibuffer-prompt)))
+            (setq key (read-key (propertize prompt 'face 'minibuffer-prompt)))
             ;; No need to re-run the hooks that we already ran
             ;; eagerly. (This is the whole point of those
             ;; shenanigans.)
@@ -6635,7 +6616,7 @@ the unwritable tidbits."
                   (cl-remove-if-not #'savehist-printable register-alist)))))
 
 ;;; Theme and face.
-(req! -theme)
+(req! theme)
 
 ;;;;;;; --> Expose <radian-after-init-hook> contents
 (radian--run-hook after-init)

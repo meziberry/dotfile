@@ -7,7 +7,7 @@
 If there's no file-level title in the file, return empty string."
   (or (if (= (org-roam-node-level node) 0)
           (org-roam-node-title node)
-        (org-roam-get-keyword "TITLE" (org-roam-node-file node)))
+        (org-roam-node-file-title node))
       ""))
 
 ;;;###autoload (autoload 'org-roam-node-radian-hierarchy "auto-roam" nil t)

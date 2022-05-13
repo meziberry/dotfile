@@ -1,4 +1,4 @@
-;; library.el --- -*- lexical-binding: t -*-
+;; lib.el --- -*- lexical-binding: t -*-
 
 ;;
 ;;; Some tiny function
@@ -104,13 +104,13 @@ at the values with which this function was called."
              if (lookup-key keymap keys)
              return it)))
 
-(cl-defun walk-directory (dirname func &key on-directory (test 'identity))
+(cl-defun walk-directory (func dirname &key dir (test 'identity))
   "Walk DIRNAME recursively with calling FUNC. Exclude hidden dir."
   (declare (indent defun))
   (cl-labels ((walk (path)
                     (cond
                      ((file-directory-p path)
-                      (when (and on-directory (funcall test path))
+                      (when (and dir (funcall test path))
                         (funcall func path))
                       (dolist (d (directory-files path t "^[^\\.]"))
                         (walk d)))
@@ -201,35 +201,33 @@ also be a single string."
     `(let ((,regexps-sym ,regexps))
        (when (stringp ,regexps-sym)
          (setq ,regexps-sym (list ,regexps-sym)))
-       (letf! ((defun message (format &rest args)
-                 (let ((str (apply #'format format args)))
-                   ;; Can't use an unnamed block because during
-                   ;; byte-compilation, some idiot loads `cl', which
-                   ;; sticks an advice onto `dolist' that makes it
-                   ;; behave like `cl-dolist' (i.e., wrap it in
-                   ;; another unnamed block) and therefore breaks
-                   ;; this code.
-                   (cl-block done
-                     (dolist (regexp ,regexps-sym)
-                       (when (or (null regexp)
-                                 (string-match-p regexp str))
-                         (cl-return-from done)))
-                     (funcall message "%s" str)))))
+       (letf! (defun message (format &rest args)
+                (let ((str (apply #'format format args)))
+                  ;; Can't use an unnamed block because during
+                  ;; byte-compilation, some idiot loads `cl', which
+                  ;; sticks an advice onto `dolist' that makes it
+                  ;; behave like `cl-dolist' (i.e., wrap it in
+                  ;; another unnamed block) and therefore breaks
+                  ;; this code.
+                  (cl-block done
+                    (dolist (regexp ,regexps-sym)
+                      (when (or (null regexp)
+                                (string-match-p regexp str))
+                        (cl-return-from done)))
+                    (funcall message "%s" str))))
          ,@body))))
 
 (defun fn-quiet! (func &rest args)
   "Invoke FUNC with ARGS, silencing all messages.
 This is an `:around' advice for many different functions."
-  (cl-letf (((symbol-function #'message) #'ignore))
-    (apply func args)))
+  (quiet! (apply func args)))
 
 (defmacro quiet! (&rest forms)
   "Run FORMS without generating any output.
 
 This silences calls to `message', `load', `write-region' and anything
 that writes to `standard-output'. In interactive sessions this won't
-suppress writing to *Messages*, only inhibit output in the echo area,
-except that FORCE-P is no-nil."
+suppress writing to *Messages*, only inhibit output in the echo area"
   (declare (indent 0))
   `(if radian-debug-p
        (progn ,@forms)
@@ -860,7 +858,7 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
             (interactive)
             (describe-function ',fun-name))))
 
-(cl-defmacro myc-make-action ((&rest args) &body body)
+(cl-defmacro minibuffer-make-action ((&rest args) &body body)
   (declare (indent 1))
   `(lambda ()
      (interactive)
@@ -877,7 +875,8 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
      (abort-recursive-edit)))
 
 (defmacro defref (name &rest refs)
-  "Make a function of NAME to browse the REFS."
+  "Make a function of NAME to browse the REFS.
+REFS: is string or a list of strings"
   (declare (indent defun))
   (let* ((flatten (cl-loop for item in refs
                            if (stringp item) collect item
@@ -885,16 +884,19 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
                            (if (stringp (car item))
                                (cl-loop for r in item collect (eval r))
                              (list (eval item)))))
+         ;; label: ref  => (ref . label)  ref => (ref)
          (consed (if (null flatten) (user-error "No suitable reference.")
                    (cl-loop for item in flatten
                             if (string-match "^\\(.*\\): \\(.*\\)$" item) collect
                             (cons (match-string 2 item) (match-string 1 item))
                             else collect (cons item nil))))
+         ;; ref without http is change to  https://github.com/ref.
          (formatted (cl-loop for item in consed
                              for ref = (car item)
                              if (not (string-prefix-p "http" ref)) do
                              (setq ref (format "https://github.com/%s" ref))
                              collect (cons ref (cdr item))))
+         ;; (ref . label) => "ref (label)"
          (propertized (cl-loop with face = 'font-lock-doc-face
                                for item in formatted
                                for label = (cdr item)
@@ -905,6 +907,7 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
                                else do
                                (setq label (car item))
                                collect label))
+         ;; function name: multi refs -> r/name*  single ref -> r/name
          (fun (intern (format (concat (unless (string-match-p "/" (symbol-name name)) "r/") (if (cdr flatten) "%s*" "%s")) name))))
     `(defun ,fun ()
        ,(format "%s\n\nBrowser/Yank it." propertized)
@@ -915,13 +918,14 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
                              (lambda ()
                                (let ((map (make-composed-keymap nil (current-local-map))))
                                  (define-key map (kbd "M-w")
-                                             (myc-make-action (ref)
+                                             (minibuffer-make-action (ref)
                                                (setq ref (car (split-string ref " ")))
                                                (kill-new ref)
                                                (message "Copy REF: %s" ref)))
                                  (use-local-map map)))
                            (completing-read "REF: " refs nil t))
                          " "))))
+         ;; confirm the segments in []
          (when (string-match "\\[\\(.+\\)\\]" ref)
            (setq ref
                  (string-replace
@@ -933,23 +937,19 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
 
 ;;; Wraps of leaf and straight
 (defmacro x (NAME &rest args)
-  "Flags: e/demand s/straight b/blackout i/increment n/loading-nil d/disabled -/ignore."
+  "Flags: e/demand s/straight b/blackout i/incrementn/loading-nil d/disabled -/ignore."
   (declare (indent defun))
   (pcase-let* ((`(,name ,flags) (split-string (symbol-name NAME) "/"))
                (name (intern name))
                (doc-strings (cl-loop for i in args until (keywordp i) collect i))
                (options (cl-set-difference args doc-strings))
                (refs (prog1 (plist-get options :url) (cl-remf options :url)))
-               (fopts (cl-loop
-                       for (c . p) in
-                       '((?e . (:require t))
-                         (?s . (:straight t))
-                         (?b . (:blackout t))
-                         (?i . (:increment t))
-                         (?n . (:loading nil))
-                         (?d . (:disabled t))
-                         (?m . (:disabled mini-p)))
-                       when (cl-find c flags) append p))
+               (fopts (cl-loop for (c . p) in
+                               '((?e . (:require t))   (?s . (:straight t))
+                                 (?b . (:blackout t))  (?i . (:increment t))
+                                 (?n . (:loading nil)) (?d . (:disabled t))
+                                 (?m . (:disabled mini-p)))
+                               when (cl-find c flags) append p))
                (inactive (if (cl-find ?- flags) t nil)))
     (delq nil
           `(progn
@@ -963,7 +963,7 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
                 `(leaf ,name ,@options ,@fopts))))))
 
 (defmacro w (name &rest args)
-  "Like `x' with :straight t. =(x pkg/s)"
+  "Like `x' with s flag. = (x name/s)"
   (declare (indent defun))
   (let ((n (symbol-name name)))
     `(x ,(intern (concat `,n (if (cl-find ?/ `,n) "s" "/s"))) ,@args)))
