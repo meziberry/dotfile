@@ -248,9 +248,7 @@ list are not loaded instead. This variable should be modified in
   "Return nil if PACKAGE should not be loaded by Radian."
   (declare (indent defun))
   (if (symbolp package)
-      (if (eq (car radian-disabled-packages) :not)
-          (memq package radian-disabled-packages)
-        (not (memq package radian-disabled-packages)))
+      (not (memq package radian-disabled-packages))
     (let ((p (car package)))
       (cond ((eq p :or) (cl-some #'featurep! (cdr package)))
             ((eq p :and) (cl-every #'featurep! (cdr package)))
@@ -350,7 +348,7 @@ unexpected ways."
     `(add-hook! ',hook
        (defun ,func-name ()
          "Automatically-generated local hook function."
-         ,@body))))
+         (eval '(progn ,@body) lexical-binding)))))
 
 (defmacro radian--run-hook (name)
   "Run the given local init HOOK.
@@ -716,7 +714,7 @@ binding the variable dynamically over the entire init-file."
 (sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz"))
 (sup 'blackout)
 
-(x leaf-keywords/e
+(z leaf-keywords/e
   :bind (radian-comma-keymap ("lf" . leaf-find))
   :config
 
@@ -747,7 +745,7 @@ binding the variable dynamically over the entire init-file."
          :aftercall
          '`((radian-load-aftercall ',leaf--name ',leaf--value) ,@leaf--body)))
 
-  ;; 2) HACK customize :straight and :disable 's macroexpands
+  ;; 2) HACK customize :straight and :disabled 's macroexpands
   ;; Let recipe sole. Recipe specified by user take precedence.
   (cl-pushnew '((eq leaf--key :straight)
                 (unless (eq (car-safe leaf--value) nil)
@@ -758,14 +756,33 @@ binding the variable dynamically over the entire init-file."
                      leaf--value))))
               leaf-normalize)
 
-  ;; push disabled package into `radian-disabled-packages'
+
+  ;; 3) HACK :disabled values for `z' macro.
+  ;;; Delete `nil' in `:preface'
+  (cl-pushnew '((eq leaf--key :preface) (delq nil leaf--value)) leaf-normalize)
   (setq leaf-keywords
         (plist-put
          leaf-keywords
          :disabled
-         '(if (eval (car leaf--value))
-              (prog1 nil (cl-pushnew `,leaf--name radian-disabled-packages))
-            `(,@leaf--body))))
+         '(let ((mini (memq 'mini leaf--value))
+                (v (car (delq 'mini leaf--value)))
+                result)
+            (cond
+             ;; use leaf as a code block, is meaning don't require the
+             ;; block name when compiling, just the block of code.
+             ((eq v 'block)
+              (setq result `((setq radian--current-feature ',leaf--name) ,@leaf--body))
+              (if mini (list (append '(unless mini-p) result)) result))
+             ;; push disabled package into `radian-disabled-packages'
+             ((eval v)
+              `((cl-pushnew ',leaf--name radian-disabled-packages)))
+             (t
+              (setq result `(memq ',leaf--name radian-disabled-packages))
+              `((unless ,(if mini (append '(or mini-p) (list result)) result)
+                  (try-feature ,leaf--name
+                    (setq radian--current-feature ',leaf--name)
+                    ,@leaf--body))))))))
+  (setq leaf-defaults (plist-put leaf-defaults :disabled nil))
 
   ;; when disable feature, register it's recipe.
   ;; (setq leaf-keywords
@@ -784,21 +801,6 @@ binding the variable dynamically over the entire init-file."
   ;;                           (delq t recipes)
   ;;                         recipes))))))
   ;;           `(,@leaf--body))))
-
-  ;; 3) Load package when compiling
-  ;; non-nil : require package when compiling.
-  ;; nil     : no require.
-  ;; And let `radian--current-feature' set in leaf--defaults.
-  (setq leaf-keywords-before-protection
-        (plist-put
-         leaf-keywords-before-protection
-         :loading
-         '(progn
-            (setq radian--current-feature leaf--name)
-            (and byte-compile-current-file (car leaf--value)
-                 (require leaf--name nil 'noerror))
-            `(,@leaf--body))))
-  (setq leaf-defaults (plist-put leaf-defaults :loading t))
 
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
@@ -821,7 +823,7 @@ binding the variable dynamically over the entire init-file."
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
 ;;       Here :package imply `eval-after-load'.
 ;;      :bind-keymap imply `require' leaf--name.
-(x leaf/n
+(z leaf
   :init
   (plist-put leaf-system-defaults :leaf-defun nil)
   (plist-put leaf-system-defaults :leaf-defvar nil)
@@ -841,15 +843,12 @@ If PKG passed, require PKG before binding."
   (defun leaf-find-regexp (symbol)
     "`leaf-find' use this function to locate block"
     (re-search-forward
-     (concat "([[:space:]]*[wx]+[[:space:]]+" (symbol-name symbol) "[/esbindm-]*\\_>") nil t)))
-
-;; REVIEW: let the obsolete warning shutup.
-(advice-add 'with-demoted-errors :around #'fn-quiet!)
-
-(w all-the-icons)
+     (concat "([[:space:]]*[zwb]+[[:space:]]+"
+             (regexp-quote (symbol-name symbol)) "[/esbikdm-]*\\_>")
+     nil t)))
 
 ;;;; Meow
-(x meow
+(z meow
   :straight (meow :repo "meow-edit/meow" :branch "master")
   :custom
   (meow-use-cursor-position-hack . t)
@@ -913,7 +912,7 @@ into `regexp-search-ring'"
        :local-repo ,(-local/ "emacs/autoload") :type nil :build (:not compile)))
 
 ;;;; gcmh-mode
-(w gcmh/b)
+(w gcmh/k)
 
 ;;;; Hide-mode-line
 (w hide-mode-line
@@ -940,7 +939,7 @@ into `regexp-search-ring'"
   (unless enable-local-variables (radian-run-local-var-hooks-h)))
 
 ;;;; Incremental lazy-loading
-(x incremental/n
+(b incremental
   :config
   ;; Incrementally
   (defvar radian-incremental-packages '(t)
@@ -1017,7 +1016,7 @@ If this is a daemon session, load them all immediately instead."
                              (cdr radian-incremental-packages) t)))))
 
 ;;;; After-call  SYMBOLS | HOOKS
-(x aftercall/n
+(b aftercall
   :config
   (defvar radian--deferred-packages-alist '(t))
 
@@ -1384,7 +1383,7 @@ unquote it using a comma."
 ;; Feature `saveplace' provides a minor mode for remembering the
 ;; location of point in each file you visit, and returning it there
 ;; when you find the file again.
-(x saveplace
+(z saveplace
   :config
   (save-place-mode +1)
 
@@ -1484,7 +1483,7 @@ unquote it using a comma."
 
 ;; Package `which-key' displays the key bindings and associated
 ;; commands following the currently-entered key prefix in a popup.
-(w which-key/b
+(w which-key/k
   :init (which-key-mode +1)
   :custom
   ;; We configure it so that `which-key' is triggered by typing C-h
@@ -1537,7 +1536,7 @@ all hooks after it are ignored.")
 (with-eval-after-load 'eldoc (eldoc-add-command 'radian/escape))
 
 ;;;; all-the-icons
-(w all-the-icons/md
+(w all-the-icons
   :commands (all-the-icons-octicon
              all-the-icons-faicon
              all-the-icons-fileicon
@@ -1595,7 +1594,7 @@ all hooks after it are ignored.")
 ;; Windows terminals don't support what I'm about to do, but best not to wrap
 ;; this in a *WINDOWS check, in case you're using WSL or Cygwin, which do and
 ;; *might* support it.
-(w clipetty/mb :hook (tty-setup-hook . global-clipetty-mode))
+(w clipetty/mk :hook (tty-setup-hook . global-clipetty-mode))
 
 ;;;; Environment variables
 
@@ -1762,7 +1761,7 @@ convert\" UTF8_STRING)'. Disable that."
 ;; rather a whole sequence of them.) For instance, you can use C-x 1
 ;; to focus on a particular window, then return to your previous
 ;; layout with C-c left.
-(x winner
+(z winner
   ;; undo/redo changes to Emacs' window layout
   :preface (defvar winner-dont-bind-my-keys t) ; I'll bind keys myself
   :hook radian-first-buffer-hook
@@ -1871,14 +1870,14 @@ active minibuffer, even if the minibuffer is not selected."
     (funcall func buffer-or-name)))
 
 ;;;;; popup system
-(x popup/em
+(z popup/em
   :straight
   `(popup :local-repo ,(-contrib/ "popup/") :type nil
           :files ("*.el" "autoload/*.el")
           :build (:not compile)))
 
 ;; Package `swsw' provides lightway to navigate windows.
-(x swsw/b
+(z swsw/k
   :straight (swsw :repo "https://git.sr.ht/~dsemy/swsw")
   :hook (radian-first-input-hook . swsw-mode)
   :chord (",," . swsw-select)
@@ -1990,7 +1989,7 @@ Return nil when horizontal scrolling has moved it off screen."
 ;; S-down to move between windows. This is much more convenient and
 ;; efficient than using the default binding, C-x o, to cycle through
 ;; all of them in an essentially unpredictable order.
-(x windmove
+(z windmove
   ;; Avoid using `windmove-default-keybindings' due to
   ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=50430.
   :bind
@@ -2001,7 +2000,7 @@ Return nil when horizontal scrolling has moved it off screen."
 
 ;; Feature `ibuffer' provides a more modern replacement for the
 ;; `list-buffers' command.
-(x ibuffer
+(z ibuffer
   :bind (([remap list-buffers] . ibuffer))
   :config
   (setq ibuffer-expert t)
@@ -2029,7 +2028,7 @@ Return nil when horizontal scrolling has moved it off screen."
 ;; Feature `whitespace' provides a minor mode for highlighting
 ;; whitespace in various special ways.
 ;;;; Whitespace
-(x whitespace/b
+(z whitespace/k
   :init
   (defun radian-highlight-non-default-indentation-h ()
     "Highlight whitespace at odds with `indent-tabs-mode'.
@@ -2093,20 +2092,13 @@ ourselves."
     input))
 
 ;;;; Complation supported by `vertico'
-(x vertico
+(z vertico
   :straight (vertico :host github :repo "minad/vertico"
                      :files ("*.el" "extensions/*.el"))
   :bind (radian-comma-keymap ("&" . vertico-repeat))
   :hook radian-first-input-hook
   :chord (:vertico-map (".." . vertico-quick-exit))
   :config
-  (defvar +vertico-company-completion-styles '(basic partial-completion orderless)
-    "Completion styles for company to use.
-
-The completion/vertico module uses the orderless completion style by default,
-but this returns too broad a candidate set for company completion. This variable
-overrides `completion-styles' during company completion sessions.")
-
   (setq vertico-resize nil
         vertico-count 17
         vertico-cycle t
@@ -2124,13 +2116,21 @@ overrides `completion-styles' during company completion sessions.")
 (w orderless
   :aftercall radian-first-input-hook
   :config
-  (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
-    "Highlight company matches correctly, and try default completion styles before
+  (after! company
+    (defvar +vertico-company-completion-styles '(orderless partial-completion basic)
+      "Completion styles for company to use.
+
+The completion/vertico module uses the orderless completion style by default,
+but this returns too broad a candidate set for company completion. This variable
+overrides `completion-styles' during company completion sessions.")
+
+    (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
+      "Highlight company matches correctly, and try default completion styles before
 orderless."
-    :around #'company-capf--candidates
-    (let ((orderless-match-faces [completions-common-part])
-          (completion-styles +vertico-company-completion-styles))
-      (apply fn args)))
+      :around #'company-capf--candidates
+      (let ((orderless-match-faces [completions-common-part])
+            (completion-styles +vertico-company-completion-styles))
+        (apply fn args))))
 
   (defun +vertico-orderless-dispatch (pattern _index _total)
     (cond
@@ -2159,7 +2159,7 @@ orderless."
      +vertico-basic-remote-try-completion
      +vertico-basic-remote-all-completions
      "Use basic completion on remote files only"))
-  (setq completion-styles '(orderless)
+  (setq completion-styles '(orderless basic)
         completion-category-defaults nil
         ;; note that despite override in the name orderless can still be used in
         ;; find-file etc.
@@ -2255,7 +2255,7 @@ orderless."
   )
 
 ;;;; Embark
-(x embark
+(z embark
   :straight (embark :type git :host github :repo "oantolin/embark"
                     :files ("embark-consult.el" "embark.el" "embark.texi"
                             "avy-embark-collect.el"))
@@ -2299,7 +2299,7 @@ completing-read prompter."
 (w wgrep :commands wgrep-change-to-wgrep-mode :setq (wgrep-auto-save-buffer . t))
 
 ;;;; isearch
-(x isearch/b
+(z isearch/k
   ;; use my prefer search workflow.
   :bind ((minibuffer-local-isearch-map
           ([?\t]      . isearch-complete-edit)
@@ -2316,13 +2316,17 @@ completing-read prompter."
           ("."        . isearch-repeat-forward)
           ("/"        . isearch-edit-string)))
 
-  :config
-  (setq isearch-allow-motion t
-        isearch-repeat-on-direction-change t
-        isearch-motion-changes-direction t))
+  :custom
+  (isearch-lazy-count . t)
+  (lazy-highlight . t)
+  (lazy-count-prefix-format . nil)
+  (lazy-count-suffix-format . "[%s/%s]")
+  (isearch-allow-motion . t)
+  (isearch-repeat-on-direction-change . t)
+  (isearch-motion-changes-direction . t))
 
 ;;;; symbols overlay
-(w symbol-overlay/mdb
+(w symbol-overlay/mdk
   :hook
   ((prog-mode-hook html-mode-hook yaml-mode-hook conf-mode-hook) . symbol-overlay-mode)
   :config
@@ -2332,7 +2336,7 @@ completing-read prompter."
 
 ;;; MODULE {files}
 ;;;; Project
-(x project/b
+(z project/k
   :init
   (setq project-switch-commands
         '((project-find-file "File" ?f)
@@ -2351,6 +2355,8 @@ completing-read prompter."
   (setq +project-commit-log-limit 25)
 
   (-keys (project-prefix-map
+          ("D" . nil)
+          ("d" . project-dired)
           ("s" . project-find-dir)
           ("l" . +project/commit-log)
           ("t" . +project/retrieve-tag)))
@@ -2365,7 +2371,7 @@ completing-read prompter."
       (error "Cannot find 'fd' command is shell environment $PATH"))
     (let* ((default-directory dir)
            (localdir (file-local-name (expand-file-name dir)))
-           (command (format "fd -t f -0 . %s" localdir)))
+           (command (format "fd -t f -c never -0 . %s" localdir)))
       (project--remote-file-names
        (split-string (shell-command-to-string command) "\0" t))))
 
@@ -2398,7 +2404,7 @@ DIR must include a .project file to be considered a project."
 ;; Feature `auth-source' reads and writes secrets from files like
 ;; ~/.netrc for TRAMP and related packages, so for example you can
 ;; avoid having to type in a particular host's password every time.
-(x auth-source
+(z auth-source
   :config
   ;; Emacs stores `authinfo' in $HOME and in plain-text. Let's not do that, mkay?
   ;; This file stores usernames, passwords, and other such treasures for the
@@ -2489,7 +2495,7 @@ permission."
 (-key* "s-x" #'radian-set-executable-permission)
 
 ;;;; recentf-mode
-(x recentf
+(z recentf
   :increment easymenu tree-widget timer
   :commands recentf-open-files
   :setq-default (history-length . 100)
@@ -2627,7 +2633,7 @@ newline."
 ;; Feature `outline' provides major and minor modes for collapsing
 ;; sections of a buffer into an outline-like format.
 ;;;; Outline
-(x outline
+(z outline
   :config
   (setq-local outline-heading-alist
               '((";;; " . 1) (";;;; " . 2) (";;;;; " . 3)
@@ -2641,7 +2647,7 @@ newline."
   :blackout outline-minor-mode)
 
 ;;;; hide-show
-(x hideshow/m
+(z hideshow/m
   :hook (prog-mode-hook . hs-minor-mode)
   :config
 
@@ -2692,11 +2698,11 @@ invocation will kill the newline."
 ;; will be deleted rather than killed. (Otherwise, in both cases the
 ;; selection is deselected and the normal function of the key is
 ;; performed.)
-(x delsel :config (delete-selection-mode -1))
+(z delsel :config (delete-selection-mode -1))
 
 ;;;; Undo/redo
 
-(x repeat
+(z repeat
   :init
   (defvar radian-repeat-exclude-commands
     '(meow-next meow-prev meow-left meow-right meow-block meow-line)
@@ -2710,7 +2716,7 @@ invocation will kill the newline."
         (setq last-repeatable-command repeat-previous-repeated-command))))
 
 ;; Feature `warnings' allows us to enable and disable warnings.
-(x warnings/e
+(z warnings/e
   :config
   ;; Ignore the warning we get when a huge buffer is reverted and the
   ;; undo information is too large to be recorded.
@@ -2769,7 +2775,7 @@ invocation will kill the newline."
 
 ;; Feature `bookmark' provides a way to mark places in a buffer. I
 ;; don't use it, but some other packages do.
-(x bookmark
+(z bookmark
   :config
 
   (dolist (func '(bookmark-load bookmark-write-file))
@@ -2777,7 +2783,7 @@ invocation will kill the newline."
 
 ;; Feature `fileloop' provides the underlying machinery used to do
 ;; operations on multiple files, such as find-and-replace.
-(x fileloop/m
+(z fileloop/m
   :when (version<= "27" emacs-version)
   :config
 
@@ -2826,7 +2832,7 @@ buffer."
   (setq imenu-list-auto-resize t))
 
 ;;;; `cua' rectangle edit
-(x cua-base
+(z cua-base
   :init (cua-selection-mode t)
   ;; disable `delete-selection-mode'
   :custom (cua-delete-selection . nil))
@@ -2848,7 +2854,7 @@ buffer."
 
 ;;;; server
 
-(x server
+(z server
   :when (display-graphic-p)
   :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
@@ -2859,7 +2865,7 @@ buffer."
     (server-start)))
 
 ;;;; tramp
-(x tramp
+(z tramp
   :init
   (unless *WINDOWS
     (setq tramp-default-method "ssh")) ; faster than the default scp
@@ -2872,7 +2878,7 @@ buffer."
                                      "[/\\\\]node_modules")))
 
 ;;;; so-long
-(x so-long
+(z so-long
   :hook (radian-first-file-hook . global-so-long-mode)
   :config
   ;; Emacs 29 introduced faster long-line detection, so they can afford a much
@@ -2922,7 +2928,7 @@ buffer."
               smartparens-strict-mode)))
 
 ;;;; prettify
-(x prog-mode
+(z prog-mode
   :init
   (defvar +ligatures-extras-in-modes t
     "List of major modes where extra ligatures should be enabled.
@@ -2973,7 +2979,7 @@ and cannot run in."
   (global-prettify-symbols-mode +1))
 
 ;;;; ligature
-(x ligature/md
+(z ligature/md
   :unless *WINDOWS          ; `ligature' make emacs slow on windows.
   :straight (ligature :host github :repo "mickeynp/ligature.el")
 
@@ -3014,7 +3020,7 @@ and cannot run in."
 ;; order to detect when the file visited by a buffer has changed, and
 ;; optionally reverting the buffer to match the file (unless it has
 ;; unsaved changes).
-(x autorevert
+(z autorevert
   :init
   (defun radian--autorevert-silence ()
     "Silence messages from `auto-revert-mode' in the current buffer."
@@ -3068,7 +3074,7 @@ and cannot run in."
 
 ;;;; Automatic delimiter pairing
 
-(x paren
+(z paren
   ;; highlight matching delimiters
   :hook (radian-first-buffer-hook . show-paren-mode)
   :setq
@@ -3077,7 +3083,7 @@ and cannot run in."
   (show-paren-when-point-inside-paren . t)
   (show-paren-when-point-in-periphery . t))
 
-(x electric
+(z electric
   :hook (radian-first-buffer-hook . electric-pair-mode)
   :setq
   (electric-pair-inhibit-predicate . 'electric-pair-conservative-inhibit)
@@ -3114,7 +3120,7 @@ and cannot run in."
 ;; Package `apheleia' implements a sophisticated algorithm for
 ;; applying code formatters asynchronously on save without moving
 ;; point or modifying the scroll position.
-(x apheleia/b
+(z apheleia/k
   :straight (apheleia :host github :repo "radian-software/apheleia")
   :init
 
@@ -3135,13 +3141,13 @@ and cannot run in."
 
 ;; Feature `abbrev' provides functionality for expanding user-defined
 ;; abbreviations. We prefer to use `yasnippet' instead, though.
-(x abbrev/b)
+(z abbrev/k)
 
 ;; Package `yasnippet' allows the expansion of user-defined
 ;; abbreviations into fillable templates. The only reason we have it
 ;; here is because it gets pulled in by LSP, and we need to unbreak
 ;; some stuff.
-(w yasnippet/m
+(w yasnippet/md
 
   :bind (yas-minor-mode-map
          ;; Disable TAB from expanding snippets, as I don't use it and
@@ -3163,7 +3169,7 @@ and cannot run in."
   ;; completions menu rather than cancelling the snippet and moving
   ;; the cursor while leaving the completions menu on-screen in the
   ;; same location.
-  (x company
+  (z company
 
     :config
 
@@ -3229,7 +3235,7 @@ currently active.")
 ;;; MODULE {IDE features}
 ;;;; Virtual environments
 ;;;; xref
-(x xref
+(z xref
   :custom
   (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
@@ -3240,7 +3246,7 @@ currently active.")
 
   :hook ((prog-mode-hook text-mode-hook) . rainbow-delimiters-mode)
   :init
-  (x cc-mode :hook (c-mode-common-hook . rainbow-delimiters-mode))
+  (z cc-mode :hook (c-mode-common-hook . rainbow-delimiters-mode))
   :config
   (setq rainbow-delimiters-max-face-count 3))
 
@@ -3525,14 +3531,104 @@ killed (which happens during Emacs shutdown)."
 
 ;;;; Autocompletion
 
+(w corfu
+  :url "minad/corfu"
+  :hook (radian-first-buffer-hook . global-corfu-mode)
+  :custom
+  (corfu-cycle . t)                ;; Enable cycling for `corfu-next/previous'
+  (corfu-auto . t)                 ;; Enable auto completion
+  ;; (corfu-separator ?\s)          ;; Orderless field separator
+  ;; (corfu-quit-at-boundary nil)   ;; Never quit at completion boundary
+  ;; (corfu-quit-no-match nil)      ;; Never quit, even if there is no match
+  ;; (corfu-preview-current nil)    ;; Disable current candidate preview
+  ;; (corfu-preselect-first nil)    ;; Disable candidate preselection
+  ;; (corfu-on-exact-match nil)     ;; Configure handling of exact matches
+  ;; (corfu-echo-documentation nil) ;; Disable documentation in the echo area
+  ;; (corfu-scroll-margin 5)        ;; Use scroll margin
+
+  ;; TAB cycle if there are only few candidates
+  (completion-cycle-threshold . 3)
+  ;; Enable indentation+completion using the TAB key.
+  ;; `completion-at-point' is often bound to M-TAB.
+  (tab-always-indent . 'complete)
+  :preface
+  ;; corfu-english-helper
+  (z corfu-english-helper
+    :straight (corfu-english-helper :host github :repo "manateelazycat/corfu-english-helper")
+    :init (-key "te" #'toggle-corfu-english-helper 'radian-comma-keymap))
+
+  (defun smarter-tab-to-complete ()
+    "Try to `org-cycle', `yas-expand', and `yas-next-field' at current cursor position.
+If all failed, try to complete the common part with `corfu-complete'"
+    (interactive)
+    (let ((old-point (point))
+          (old-tick (buffer-chars-modified-tick))
+          (func-list
+           (if (equal major-mode 'org-mode) '(org-cycle yas-expand yas-next-field)
+             '(yas-expand yas-next-field))))
+      (catch 'func-suceed
+        (dolist (func func-list)
+          (ignore-errors (call-interactively func))
+          (unless (and (eq old-point (point))
+                       (eq old-tick (buffer-chars-modified-tick)))
+            (throw 'func-suceed t)))
+        (corfu-complete))))
+  :bind (corfu-map
+         ([tab] . smarter-tab-to-complete)
+         ("TAB" . smarter-tab-to-complete))
+  :config
+  (after! meow (add-hook 'meow-insert-exit-hook #'corfu-quit))
+  (defun corfu-enable-in-minibuffer ()
+    "Enable Corfu in the minibuffer if `completion-at-point' is bound."
+    (when (where-is-internal #'completion-at-point (list (current-local-map)))
+      (setq-local corfu-auto t) ;Enable/disable auto completion
+      (corfu-mode 1)))
+  (add-hook 'minibuffer-setup-hook #'corfu-enable-in-minibuffer))
+
+(z corfu-popup
+    :after corfu
+    :straight
+    (popon :type git :repo "https://codeberg.org/akib/emacs-popon.git")
+    (corfu-popup :type git :repo "https://codeberg.org/akib/emacs-corfu-popup.git")
+    :init (unless (display-graphic-p) (corfu-popup-mode +1)))
+
+(w cape/e
+  :url "minad/cape"
+  :after corfu
+  :custom
+  (dabbrev-ignored-buffer-regexps . '("\\.\\(?:pdf\\|jpe?g\\|png\\)\\'"))
+  :init
+  ;; Add `completion-at-point-functions', used by `completion-at-point'.
+  ;;(add-to-list 'completion-at-point-functions #'cape-history)
+  ;;(add-to-list 'completion-at-point-functions #'cape-tex)
+  ;;(add-to-list 'completion-at-point-functions #'cape-sgml)
+  ;;(add-to-list 'completion-at-point-functions #'cape-rfc1345)
+  ;;(add-to-list 'completion-at-point-functions #'cape-ispell)
+  ;;(add-to-list 'completion-at-point-functions #'cape-dict)
+  ;;(add-to-list 'completion-at-point-functions #'cape-line)
+  (add-to-list 'completion-at-point-functions #'cape-keyword)
+  (add-to-list 'completion-at-point-functions #'cape-file)
+  (add-to-list 'completion-at-point-functions #'cape-dabbrev)
+  (add-to-list 'completion-at-point-functions #'cape-abbrev)
+  (add-to-list 'completion-at-point-functions #'cape-symbol))
+
+;;;; TabNine
+(z tabnine-capf/em
+  :after cape
+  :straight
+  (tabnine-capf :host github :repo "50ways2sayhard/tabnine-capf" :files ("*.el" "*.sh"))
+  :config
+  (add-hook 'kill-emacs-hook  #'tabnine-capf-kill-process)
+  (add-to-list 'completion-at-point-functions #'tabnine-completion-at-point))
+
 ;; Package `company' provides an in-buffer autocompletion framework.
 ;; It allows for packages to define backends that supply completion
 ;; candidates, as well as optional documentation and source code. Then
 ;; Company allows for multiple frontends to display the candidates,
 ;; such as a tooltip menu. Company stands for "Complete Anything".
-(x company/mb
+(z company/mkd
   :straight
-  (company :type git :flavor melpa :host github
+  (company :flavor melpa :host github
            :repo "company-mode/company-mode" :files (:defaults "icons"))
   :hook (after-init-hook . global-company-mode)
   :bind (;; Remap the standard Emacs keybindings for invoking
@@ -3687,15 +3783,6 @@ menu to disappear and then come back after `company-idle-delay'."
 
   (add-hook! '(shell-mode-hook) (company-mode -1)))
 
-;;;; TabNine
-;; (leaf company-tabnine
-;;   :after company
-;;   :config
-;;   (setq company-show-numbers t
-;;         company-tabnine-always-trigger nil)
-;;   (setq company-backends (cons '(company-tabnine :separate company-capf)
-;;                                company-backends)))
-
 ;;;; Definition location
 
 ;; Package `dumb-jump' provides a mechanism to jump to the definitions
@@ -3716,7 +3803,7 @@ menu to disappear and then come back after `company-idle-delay'."
 ;; Feature `eldoc' provides a minor mode (enabled by default in Emacs
 ;; 25) which allows function signatures or other metadata to be
 ;; displayed in the echo area.
-(x eldoc/eb
+(z eldoc/ek
   :custom
   ;; Always truncate ElDoc messages to one line. This prevents the
   ;; echo area from resizing itself unexpectedly when point is on a
@@ -3765,7 +3852,7 @@ was printed, and only have ElDoc display if one wasn't."
 ;; Flycheck anywhere else and rely on `lsp-ui' to handle things when
 ;; appropriate. However, interestingly, Flycheck is not marked as a
 ;; dependency of `lsp-ui', hence this declaration.
-(w flycheck/mb)
+(w flycheck/mk)
 
 ;; Package `lsp-ui' provides a pretty UI for showing diagnostic
 ;; messages from LSP in the buffer using overlays. It's configured
@@ -3799,11 +3886,11 @@ was printed, and only have ElDoc display if one wasn't."
                 (apply completing-read prompt collection args))))
       (apply orig-fun args)))
 
-  (x lsp-ui-imenu :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
+  (z lsp-ui-imenu :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
 
   ;; Feature `lsp-ui-doc' from package `lsp-ui' displays documentation
   ;; in a child frame when point is on a symbol.
-  (x lsp-ui-doc
+  (z lsp-ui-doc
     :config
     (setq lsp-ui-doc-max-height 10
           lsp-ui-doc-max-width 40
@@ -3828,7 +3915,7 @@ was printed, and only have ElDoc display if one wasn't."
 
 ;; Feature `lisp-mode' provides a base major mode for Lisp languages,
 ;; and supporting functions for dealing with Lisp code.
-(x lisp-mode
+(z lisp-mode
   :bind
   ([remap eval-expression] . pp-eval-expression)
   :init
@@ -4004,7 +4091,7 @@ was printed, and only have ElDoc display if one wasn't."
 
 ;; Feature `cc-mode' provides major modes for C, C++, Objective-C, and
 ;; Java.
-(x cc-mode
+(z cc-mode
 
   :defer-config
 
@@ -4101,7 +4188,7 @@ See <https://github.com/dominikh/go-mode.el/issues/232>."
       (setq-local beginning-of-defun-function #'radian--go-beginning-of-defun)
       (setq-local end-of-defun-function #'radian--go-end-of-defun)))
 
-  (x lsp-ui/m
+  (z lsp-ui/m
 
     :config
 
@@ -4162,7 +4249,7 @@ This works around an upstream bug; see
   ;; Feature `haskell' from package `haskell-mode' is a meta-feature
   ;; which includes many other features from the package, and also for
   ;; some reason is where `interactive-haskell-mode' is defined.
-  (x haskell
+  (z haskell
 
     :defer-config
 
@@ -4174,7 +4261,7 @@ This works around an upstream bug; see
 
   ;; Feature `haskell-customize' from package `haskell-mode' defines the
   ;; user options for the package.
-  (x haskell-customize
+  (z haskell-customize
     :config
 
     ;; Disable in-buffer underlining of errors and warnings, since we
@@ -4194,7 +4281,7 @@ This works around an upstream bug; see
 ;;;; Makefile
 
 ;; Feature `make-mode' provides major modes for editing Makefiles.
-(x make-mode/m
+(z make-mode/m
   :blackout ((makefile-automake-mode . "Makefile")
              (makefile-gmake-mode . "Makefile")
              (makefile-makepp-mode . "Makefile")
@@ -4270,7 +4357,7 @@ https://github.com/jrblevin/markdown-mode/issues/328."
 ;; https://www.python.org/
 
 ;; Feature `python' provides a major mode for Python.
-(x python/m
+(z python/m
   :config
 
   ;; The only consistent style.
@@ -4364,7 +4451,7 @@ Return either a string or nil."
 ;; https://www.gnu.org/software/bash/
 ;; http://www.zsh.org/
 
-(x sh-script/m
+(z sh-script/m
 
   :defer-config
 
@@ -4390,7 +4477,7 @@ Return either a string or nil."
 ;; Feature `js' provides a major mode `js-mode' for JavaScript. We
 ;; don't use it (because `web-mode' is better), but we still configure
 ;; some of its variables because `json-mode' uses them.
-(x js/m
+(z js/m
   :config
 
   ;; Default is 4, and nobody should indent JSON with four spaces.
@@ -4479,7 +4566,7 @@ enough for the moment."
       ;; auto-fill.
       (setq-local comment-start-skip "// *")))
 
-  (x apheleia/n
+  (z apheleia
     :config
     (add-hook! 'apheleia-post-format-hook
       (defun radian--web-highlight-after-formatting ()
@@ -4507,7 +4594,7 @@ poke it. Otherwise the modified text remains unfontified."
 (w dockerfile-mode/md)
 
 ;; This package include `gitconfig-mode' `gitignore-mode' `gitattributes-mode'
-(w git-modes/m :init (x gitconfig-mode :mode "\\.gitconfig.*"))
+(w git-modes/m :init (z gitconfig-mode :mode "\\.gitconfig.*"))
 
 ;; Package `json-mode' provides a major mode for JSON.
 (w json-mode/m
@@ -4605,7 +4692,7 @@ This function calls `json-mode--update-auto-mode' to change the
 ;;;; Help
 
 ;; Feature `help' powers the *Help* buffer and related functionality.
-(x help
+(z help
   :bind
   ;; Aviod visiting HELLO file accidentally.
   ("C-h h" . nil)
@@ -4727,7 +4814,7 @@ bizarre reason."
 
 ;; Feature `cus-edit' powers Customize buffers and related
 ;; functionality.
-(x cus-edit/m
+(z cus-edit/m
   :config
 
   ;; Don't show the search box in Custom.
@@ -4739,7 +4826,7 @@ bizarre reason."
 ;; important! It also provides the major mode for the *scratch*
 ;; buffer, which is very similar but slightly different. Not as
 ;; important.
-(x elisp-mode
+(z elisp-mode
   :config
   (defun radian/headerise-elisp ()
     "Add minimal header and footer to an elisp buffer in order to placate flycheck."
@@ -4895,7 +4982,7 @@ SYMBOL is as in `xref-find-definitions'."
 
 ;; Feature `find-func' provides the ability for you to locate the
 ;; definitions of Emacs Lisp functions and variables.
-(x find-func/m
+(b find-func/m
 
   :config
 
@@ -4921,7 +5008,7 @@ SYMBOL is as in `xref-find-definitions'."
 ;;;;; Emacs Lisp byte-compilation
 
 ;; Feature `bytecomp' handles byte-compilation of Emacs Lisp code.
-(x bytecomp
+(b bytecomp
   :config
 
   ;; Eliminate two warnings that are essentially useless for me. The
@@ -4977,7 +5064,7 @@ messages."
 ;;;;; Emacs Lisp linting
 ;; Feature `checkdoc' provides some tools for validating Elisp
 ;; docstrings against common conventions.
-(x checkdoc
+(z checkdoc
   :init
   ;; Not sure why this isn't included by default.
   (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
@@ -5000,21 +5087,16 @@ messages."
 
 
 ;;;; Organization
-;; Use (x /m) here because we already installed Org earlier.
-(x org/m
+;; Use (z /m) here because we already installed Org earlier.
+(z org/m
   :chord (",c" . org-capture)
   :increment
   calendar find-func format-spec org-macs org-compat org-faces
   org-entities org-list org-pcomplete org-src org-footnote
   org-macro ob org org-agenda org-capture
 
-  :init
-  (req! org)
-  (setq org-use-property-inheritance t   ; it's convenient to have properties inherited
-        org-log-done 'time               ; having the time a item is done sounds convininet
-        org-re-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js")
-
   :config
+  (req! org)
   (w ox-pandoc)
   (w htmlize)
   (w orgit)
@@ -5083,15 +5165,12 @@ messages."
 
   ;; Feature `org-indent' provides an alternative view for Org files in
   ;; which sub-headings are indented.
-  (x org-indent/m
+  (z org-indent/mk :init (add-hook 'org-mode-hook #'org-indent-mode))
 
-    :init
-
-    (add-hook 'org-mode-hook #'org-indent-mode))
   ;; Feature `org-agenda' from package `org' provides the agenda view
   ;; functionality, which allows for collating TODO items from your Org
   ;; files into a single buffer.
-  (x org-agenda/m
+  (z org-agenda/m
     :custom (org-agenda-restore-windows-after-quit . t)
     :config
 
@@ -5125,7 +5204,7 @@ This makes the behavior of `find-file' more reasonable."
     ;; Hide blocked tasks in the agenda view.
     (setq org-agenda-dim-blocked-tasks 'invisible))
 
-  (x org-crypt/m ; built-in
+  (z org-crypt/m ; built-in
     :commands org-encrypt-entries org-encrypt-entry org-decrypt-entries org-decrypt-entry
     :hook (org-fold-reveal-start-hook . org-decrypt-entry)
     :preface
@@ -5139,7 +5218,7 @@ This makes the behavior of `find-file' more reasonable."
 
   ;; Feature `org-clock' from package `org' provides the task clocking
   ;; functionality.
-  (x org-clock/m
+  (z org-clock/m
     ;; We have to autoload these functions in order for the below code
     ;; that enables clock persistence without slowing down startup to
     ;; work.
@@ -5181,7 +5260,7 @@ be invoked before `org-mode-hook' is run."
 
 
 ;;;; Roam
-(x org-roam/m
+(z org-roam/m
   :straight (org-roam :host github :repo "org-roam/org-roam" :files (:defaults "extensions/*"))
   :preface
   (w emacsql-sqlite-builtin)
@@ -5311,7 +5390,7 @@ In case of failure, fail gracefully."
 ;; Package `osx-trash' provides functionality that allows Emacs to
 ;; place files in the trash on macOS.
 (w osx-trash
-  :disabled (not (and *MAC (featurep! osx-trash)))
+  :disabled (not *MAC)
   :commands (osx-trash-move-file-to-trash)
   :init
 
@@ -5364,7 +5443,7 @@ non-nil value to enable trashing for file operations."
   (advice-remove #'list-directory #'radian--use-gls-for-list-directory))
 
 ;; Feature `dired' provides a simplistic filesystem manager in Emacs.
-(x dired
+(z dired
   ;; This binding is way nicer than ^. It's inspired by
   ;; Sunrise Commander.
   :bind (dired-mode-map ("J" . dired-up-directory))
@@ -5428,7 +5507,7 @@ the problematic case.)"
   ;; function.)
   (setq dired-auto-revert-buffer #'dired-buffer-stale-p))
 
-(x dired-x
+(z dired-x
   :bind (;; Bindings for jumping to the current directory in Dired.
          ("C-x C-j" . dired-jump)
          ("C-x 4 C-j" . dired-jump-other-window))
@@ -5448,7 +5527,7 @@ are probably not going to be installed."
 
 
 ;; find-name-dired find stuff from different directory.
-(x find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
+(z find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
 
 ;;;; Terminal emulator
 
@@ -5460,14 +5539,14 @@ are probably not going to be installed."
 
 ;; Feature `term' provides a workable, though slow, terminal emulator
 ;; within Emacs.
-(x term
+(z term
   ;; Allow usage of more commands from within the terminal.
   :bind (term-raw-map
          ("M-x" . execute-extended-command)
          ("C-h" . help-command)))
 
 (eval-unless! *WINDOWS "vterm cannot run on Windows"
-(x vterm
+(z vterm
   :bind (vterm-mode-map
          ("C-y" . vterm-yank)
          ("M-y" . vterm-yank-pop)
@@ -5518,11 +5597,11 @@ are probably not going to be installed."
 ;; Disable VC. This improves performance and disables some annoying
 ;; warning messages and prompts, especially regarding symlinks. See
 ;; https://stackoverflow.com/a/6190338/3538165.
-;; (x vc-hooks :setq (vc-handled-backends . nil))
+;; (z vc-hooks :setq (vc-handled-backends . nil))
 
 ;; Feature `smerge-mode' provides an interactive mode for visualizing
 ;; and resolving Git merge conflicts.
-(x smerge-mode/bn)
+(b smerge-mode)
 
 ;; Package `magit' provides a full graphical interface for Git within
 ;; Emacs.
@@ -5615,7 +5694,7 @@ as argument."
 
 ;; Feature `magit-diff' from package `magit' handles all the stuff
 ;; related to interactive Git diffs.
-(x magit-diff/m
+(z magit-diff/m
   :config
 
   (defadvice! radian--magit-diff-revert-before-smerge (buf _pos)
@@ -5634,7 +5713,7 @@ disable itself. Sad."
 
 ;; Feature `git-commit' from package `magit' provides the commit
 ;; message editing capabilities of Magit.
-(x git-commit/m
+(z git-commit/m
   :config
 
   ;; Max length for commit message summary is 50 characters as per
@@ -5650,7 +5729,7 @@ disable itself. Sad."
 ;; Package `emacsql-sqlite' is a dependency of Forge which is used to
 ;; interact with the SQLite database that Forge uses to keep track of
 ;; information about pull requests.
-(x emacsql-sqlite/m
+(z emacsql-sqlite/m
 
   :init
 
@@ -5702,7 +5781,7 @@ command."
 ;; Package `git-gutter' adds a column to the left-hand side of each
 ;; window, showing which lines have been added, removed, or modified
 ;; since the last Git commit.
-(w git-gutter/mb
+(w git-gutter/mk
 
   :hook (radian-first-file-hook . global-git-gutter-mode)
   :commands (git-gutter:previous-hunk
@@ -5776,7 +5855,7 @@ changes, which means that `git-gutter' needs to be re-run.")
                 (unless (file-remote-p buffer-file-name)
                   (git-gutter)))))))))
 
-  (x autorevert/n
+  (b autorevert
     :config
 
     (add-hook! 'after-revert-hook
@@ -5785,7 +5864,7 @@ changes, which means that `git-gutter' needs to be re-run.")
         (when git-gutter-mode
           (git-gutter)))))
 
-  (x apheleia/n
+  (b apheleia
     :config
     (add-hook! 'apheleia-post-format-hook
       (defun radian--git-gutter-after-apheleia ()
@@ -5850,7 +5929,7 @@ Instead, display simply a flat colored region in the fringe."
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
 (eval-unless! "WIP"
-(x browse-url/m
+(z browse-url/m
   :bind ("C-c C-o" . (cmds! (radian--browse-url-predicate) #'browse-url-at-point))
   :init
   (defun radian--browse-url-predicate ()
@@ -5978,7 +6057,7 @@ Instead, display simply a flat colored region in the fringe."
 
 ;;; MODULE {Appearance}
 ;;;; pixel-scroll
-(x pixel-scroll
+(z pixel-scroll
   :emacs>= 29
   :defun pixel-scroll-precision-mode
   :custom
@@ -5987,7 +6066,7 @@ Instead, display simply a flat colored region in the fringe."
   :init (pixel-scroll-precision-mode 1))
 
 ;;;; tab-bar
-(x tab-bar
+(z tab-bar
   :init
   (defun +tab-bar-right ()
     (let* ((p (or (radian-project-root) ""))
@@ -6064,7 +6143,7 @@ No tab will created if the command is cancelled."
   (eval-after-load 'info '(define-key Info-mode-map "o" #'link-hint-open-link)))
 
 ;;;; pulse.el
-(x pulse/m
+(z pulse/m
   :defvar pulse-delay
   :config
   (defface radian-pulse-line
@@ -6096,7 +6175,7 @@ No tab will created if the command is cancelled."
     (advice-add command :after #'pulse-line)))
 
 ;;;; Rainbow
-(w rainbow-mode/mb
+(w rainbow-mode/mk
   :hook ((prog-mode-hook text-mode-hook) . rainbow-mode)
   :config
   (add-hook! '(c-mode-hook c++-mode-hook) (rainbow-mode -1))
@@ -6279,8 +6358,13 @@ turn it off again after creating the first frame."
 
 ;;;; Fonts
 (req! font)
+
 ;;;; mode-line
-(require 'r-modeline)
+(b +modeline/e
+  :custom
+  (+modeline-height . 20)
+  (+modeline-enable-icon . t)
+  :config (+modeline-global-mode +1))
 
 ;;;; Formfeed display.
 (defun xah-insert-formfeed ()
@@ -6509,7 +6593,7 @@ bound dynamically before being used.")
 ;; based on the value of `echo-keystrokes', and then later overrides
 ;; `echo-keystrokes' to the value of this internal variable,
 ;; effectively overwriting our configuration here. Stop that behavior.
-(x which-key/m :config (setq which-key-echo-keystrokes echo-keystrokes))
+(z which-key/m :config (setq which-key-echo-keystrokes echo-keystrokes))
 
 (after! comint
   (setq comint-prompt-read-only t
@@ -6557,7 +6641,7 @@ If RETURN-P, return the message as a string instead of displaying it."
              (float-time (time-subtract (current-time) before-init-time))))))
 
 ;;;; simple
-(x simple
+(z simple
   :bind
   ("C-x C-M-t" . transpose-regions)
   (([remap default-indent-new-line] . radian-continue-comment))
@@ -6582,7 +6666,7 @@ two inserted lines are the same."
       (default-indent-new-line))))
 
 ;;;; savehist for session
-(x savehist
+(z savehist
   ;; persist variables across sessions
   :increment custom
   :hook radian-first-input-hook

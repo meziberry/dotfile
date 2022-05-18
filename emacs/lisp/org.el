@@ -14,6 +14,9 @@
 (defun +org-init-appearance-h ()
   "Configures the UI for `org-mode'."
   (setq ;org-indirect-buffer-display #'current-window
+   org-use-property-inheritance t   ; it's convenient to have properties inherited
+   org-log-done 'time              ; having the time a item is done sounds convininet
+
    ;; When you create a sparse tree and `org-indent-mode' is enabled,
    ;; the highlighting destroys the invisibility added by
    ;; `org-indent-mode'. Therefore, don't highlight when creating a
@@ -47,7 +50,7 @@
    org-num-skip-tags '("noexport" "nonum")
    ;; Sub-lists should have different bullets
    org-list-demote-modify-bullet '(("+" . "-") ("-" . "+") ("*" . "+") ("1." . "a."))
-   org-ellipsis " ▾ "
+   org-ellipsis " ▾ "                   ;▾▼◣ ⤵ ⤶
    org-priority-highest ?A
    org-priority-lowest ?E
    org-priority-faces
@@ -200,7 +203,7 @@
         org-attach-use-inheritance t) ; inherit properties from parent nodes
 
   ;; Autoload all these commands that org-attach doesn't autoload itself
-  `(eval (x org-attach/m
+  `(eval (z org-attach/m
            :commands (org-attach-new
                       org-attach-open
                       org-attach-open-in-emacs
@@ -570,7 +573,7 @@ relative to `org-directory', unless it is an absolute path."
         org-latex-prefer-user-labels t)
 
   `(eval
-    (x ox-pandoc/m
+    (z ox-pandoc/m
       :when (executable-find "pandoc")
       :after ox
       :init

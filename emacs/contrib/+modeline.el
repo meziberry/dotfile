@@ -1,4 +1,4 @@
-;;; r-modeline.el --- Insert description here -*- lexical-binding: t -*-
+;;; +modeline.el --- Insert description here -*- lexical-binding: t -*-
 ;;; Commentary:
 
 ;; This is a slimmed down version of `doom-modeline' that manipulates
@@ -81,7 +81,8 @@ spaces."
                         (format-mode-line radian-mode-line-right))
                        'fixedcase 'literal))))
 
-(require 'all-the-icons)
+
+(require 'all-the-icons nil t)
 
 (defun +modeline--set-var-and-refresh-bars-fn (&optional symbol value)
   (when symbol
@@ -115,6 +116,10 @@ bars in the modeline. `setq' will not."
   :type 'integer
   :set #'+modeline--set-var-and-refresh-bars-fn)
 
+(defcustom +modeline-enable-icon t
+  "Enable the `all-the-icons' option."
+  :set #'+modeline--set-var-and-refresh-bars-fn)
+
 (defvar +modeline-format-alist ()
   "An alist of modeline formats defined with `def-modeline!'.
 
@@ -143,6 +148,11 @@ side of the modeline, and whose CDR is the right-hand side.")
 
 ;;; `active'
 (defvar +modeline--active-window (selected-window))
+
+(defun +modeline-icon-displayable-p ()
+  "Return non-nil if icons are displayable."
+  (and +modeline-enable-icon
+       (display-graphic-p)))
 
 (defun +modeline-active ()
   "Return non-nil if the selected window has an active modeline."
@@ -185,12 +195,16 @@ side of the modeline, and whose CDR is the right-hand side.")
 (defun +modeline-format-icon (icon-set icon label &optional face help-echo voffset)
   "Build from ICON-SET the ICON with LABEL.
 Using optionals attributes FACE, HELP-ECHO and VOFFSET."
-  (let ((icon-set-fn (pcase icon-set
-                       ('octicon #'all-the-icons-octicon)
-                       ('faicon #'all-the-icons-faicon)
-                       ('material #'all-the-icons-material)
-                       ('alltheicon #'all-the-icons-alltheicon)
-                       ('fileicon #'all-the-icons-fileicon))))
+  (let* ((fn (intern-soft (concat "all-the-icons-" (symbol-name icon-set))))
+         (str (pcase icon-set
+                ('octicon "")
+                ('faicon "")
+                ('material "🗸")
+                ('alltheicon "")
+                ('fileicon "")))
+         (icon-set-fn (if (+modeline-icon-displayable-p)
+                          fn
+                        (lambda (&rest _) (propertize str 'face face)))))
     (propertize (concat (funcall icon-set-fn
                                  icon
                                  :face face
@@ -297,43 +311,7 @@ LHS and RHS will accept."
       (when radian-init-time
         (+modeline-refresh-bars-h)))))
 
-
 ;;; `+modeline-matches'
-(w anzu/d
-  :aftercall isearch-mode
-  :config
-  ;; We manage our own modeline segments
-  (setq anzu-cons-mode-line-p nil)
-  ;; Ensure anzu state is cleared when searches & iedit are done
-  (add-hook 'iedit-mode-end-hook #'anzu--reset-status)
-  ;; Fix matches segment mirroring across all buffers
-  (mapc #'make-variable-buffer-local
-        '(anzu--total-matched
-          anzu--current-position
-          anzu--state
-          anzu--cached-count
-          anzu--cached-positions anzu--last-command
-          anzu--last-isearch-string anzu--overflow-p)))
-
-(defun +modeline--anzu ()
-  "Show the match index and total number thereof.
-Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
-`evil-search'."
-  (when (and (bound-and-true-p anzu--state)
-             (not (bound-and-true-p iedit-mode)))
-    (propertize
-     (let ((here anzu--current-position)
-           (total anzu--total-matched))
-       (cond ((eq anzu--state 'replace-query)
-              (format " %d replace " anzu--cached-count))
-             ((eq anzu--state 'replace)
-              (format " %d/%d " (1+ here) total))
-             (anzu--overflow-p
-              (format " %s+ " total))
-             (t
-              (format " %s/%d " here total))))
-     'face (if (+modeline-active) 'radian-modeline-highlight))))
-
 (defun +modeline--overlay< (a b)
   "Sort overlay A and B."
   (< (overlay-start a) (overlay-start b)))
@@ -371,15 +349,16 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
                             "Macro")
                           'face 'radian-modeline-highlight)
               sep
-              (all-the-icons-octicon "triangle-right"
-                                     :face 'radian-modeline-highlight
-                                     :v-adjust -0.05)
+              (if (+modeline-icon-displayable-p)
+                  (all-the-icons-octicon "triangle-right"
+                                         :face 'radian-modeline-highlight
+                                         :v-adjust -0.05)
+                "▶")
               sep))))
 
 (def-modeline-var! +modeline-matches
   '(:eval
     (let ((meta (concat (+modeline--macro-recording)
-                        (+modeline--anzu)
                         (+modeline--iedit))))
       (or (and (not (equal meta "")) meta)
           " %I "))))                    ;file-size
@@ -388,11 +367,12 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
 ;;; `+modeline-modes'
 (def-modeline-var! +modeline-modes ; remove minor modes
   '(""
+    minor-mode-alist
+    " "
     (:propertize mode-name
                  face bold
                  mouse-face radian-modeline-highlight)
     mode-line-process
-    minor-mode-alist
     "%n"
     " "))
 
@@ -566,8 +546,10 @@ lines are selected, or the NxM dimensions of a block selection.")
     mode-line-misc-info
     +modeline-modes
     (vc-mode ("  "
-              ,(all-the-icons-octicon "git-branch" :v-adjust 0.0)
-              vc-mode " "))
+              ,(if (+modeline-icon-displayable-p)
+                   (all-the-icons-octicon "git-branch" :v-adjust 0.0)
+                 "")
+              vc-mode))
     "  "
     +modeline-encoding
     (+modeline-checker ("" +modeline-checker " "))
@@ -575,11 +557,13 @@ lines are selected, or the NxM dimensions of a block selection.")
 
 (def-modeline! 'project
   `(" "
-    ,(all-the-icons-octicon
-      "file-directory"
-      :face 'bold
-      :v-adjust -0.06
-      :height 1.1)
+    ,(if (+modeline-icon-displayable-p)
+         (all-the-icons-octicon
+          "file-directory"
+          :face 'bold
+          :v-adjust -0.06
+          :height 1.1)
+       "")
     (:propertize (" " (:eval (abbreviate-file-name default-directory)))
                  face bold))
   '("" mode-line-misc-info +modeline-modes +modeline-meow))
@@ -645,7 +629,5 @@ lines are selected, or the NxM dimensions of a block selection.")
 
 (add-hook '+modeline-global-mode-hook #'size-indication-mode)
 
-(+modeline-global-mode +1)
-
-(provide 'r-modeline)
+(provide '+modeline)
 ;;; modeline.el ends here

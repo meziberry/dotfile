@@ -934,10 +934,22 @@ REFS: is string or a list of strings"
                   ref)))
          (browse-url ref)))))
 
+(defmacro try-feature (feature &rest body)
+  "if FEATURE is unavailable, warp the body with eval.
+Otherwise eval BODY normally (subject to eager macroexpansion).
+In either case, eagerly load FEATURE during byte-compilation."
+  (declare (indent 1))
+  (let ((available (featurep feature)))
+    (when byte-compile-current-file
+      (setq available (require feature nil 'noerror)))
+    (if available
+        `(progn ,@body)
+      `(eval '(progn ,@body) lexical-binding))))
+
 
 ;;; Wraps of leaf and straight
-(defmacro x (NAME &rest args)
-  "Flags: e/demand s/straight b/blackout i/incrementn/loading-nil d/disabled -/ignore."
+(defmacro z (NAME &rest args)
+  "Flags: e/demand s/straight k/blackout i/increment b/block d/disabled -/ignore."
   (declare (indent defun))
   (pcase-let* ((`(,name ,flags) (split-string (symbol-name NAME) "/"))
                (name (intern name))
@@ -945,28 +957,34 @@ REFS: is string or a list of strings"
                (options (cl-set-difference args doc-strings))
                (refs (prog1 (plist-get options :url) (cl-remf options :url)))
                (fopts (cl-loop for (c . p) in
-                               '((?e . (:require t))   (?s . (:straight t))
-                                 (?b . (:blackout t))  (?i . (:increment t))
-                                 (?n . (:loading nil)) (?d . (:disabled t))
-                                 (?m . (:disabled mini-p)))
+                               '((?e . (:require t))      (?s . (:straight t))
+                                 (?k . (:blackout t))     (?i . (:increment t))
+                                 (?m . (:disabled 'mini)) (?d . (:disabled t))
+                                 (?b . (:disabled 'block)))
                                when (cl-find c flags) append p))
                (inactive (if (cl-find ?- flags) t nil)))
-    (delq nil
-          `(progn
-             ,(if doc-strings `(defhelp ,name ,@doc-strings))
-             ,(if refs `(defref ,name ,refs))
-             ,(if inactive
-                  ;; still run the first sexp of :init when inactive
-                  ;; `,@(plist-get options :init)
-                  `(leaf ,name :straight
-                     ,(or (plist-get options :straight) (plist-get fopts :straight)))
-                `(leaf ,name ,@options ,@fopts))))))
+    (if inactive
+         ;; still run the first sexp of :init when inactive
+         ;; `,@(plist-get options :init)
+         `(leaf ,name :disabled 'block :straight
+            ,(or (plist-get options :straight) (plist-get fopts :straight)))
+       `(leaf ,name :preface
+          ,(if doc-strings `(defhelper ,name ,@doc-strings))
+          ,(if refs `(defref ,name ,refs))
+          ,@options ,@fopts))))
 
 (defmacro w (name &rest args)
-  "Like `x' with s flag. = (x name/s)"
+  "Like `z' with s flag. = (z name/s)"
   (declare (indent defun))
   (let ((n (symbol-name name)))
-    `(x ,(intern (concat `,n (if (cl-find ?/ `,n) "s" "/s"))) ,@args)))
+    `(z ,(intern (concat `,n (if (cl-find ?/ `,n) "s" "/s"))) ,@args)))
+
+(defmacro b (name &rest args)
+  "Like `z' with s flag. = (z name/b).
+Just wrap code in leaf block, no `require' it."
+  (declare (indent defun))
+  (let ((n (symbol-name name)))
+    `(z ,(intern (concat `,n (if (cl-find ?/ `,n) "b" "/b"))) ,@args)))
 
 (defalias 'sup #'straight-use-package)
 (defalias '-key 'leaf-key)
