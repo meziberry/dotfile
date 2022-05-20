@@ -946,6 +946,7 @@ In either case, eagerly load FEATURE during byte-compilation."
         `(progn ,@body)
       `(eval '(progn ,@body) lexical-binding))))
 
+
 
 ;;; Wraps of leaf and straight
 (defmacro z (NAME &rest args)
@@ -962,16 +963,15 @@ In either case, eagerly load FEATURE during byte-compilation."
                                  (?m . (:disabled 'mini)) (?d . (:disabled t))
                                  (?b . (:disabled 'block)))
                                when (cl-find c flags) append p))
-               (inactive (if (cl-find ?- flags) t nil)))
+               (inactive (if (cl-find ?- flags) t)))
     (if inactive
-         ;; still run the first sexp of :init when inactive
-         ;; `,@(plist-get options :init)
-         `(leaf ,name :disabled 'block :straight
-            ,(or (plist-get options :straight) (plist-get fopts :straight)))
-       `(leaf ,name :preface
-          ,(if doc-strings `(defhelper ,name ,@doc-strings))
-          ,(if refs `(defref ,name ,refs))
-          ,@options ,@fopts))))
+        `(leaf ,name :disabled 'block ;; :init (plist-get options :init)
+           :straight
+           ,(or (plist-get options :straight) (plist-get fopts :straight)))
+      `(leaf ,name :preface
+         ,(if doc-strings `(defhelper ,name ,@doc-strings))
+         ,(if refs `(defref ,name ,refs))
+         ,@options ,@fopts))))
 
 (defmacro w (name &rest args)
   "Like `z' with s flag. = (z name/s)"

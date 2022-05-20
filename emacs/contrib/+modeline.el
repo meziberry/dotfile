@@ -11,13 +11,7 @@
 
 ;;; Code:
 
-;;;; Mode line
-(eval-unless! "INACTIVE"
-(x recursion-indicator/m
-  :straight (recursion-indicator :host github :repo "minad/recursion-indicator")
-  :custom (recursion-indicator-minibuffer . "◀")
-  :init (recursion-indicator-mode +1))
-
+;;;; Default Mode-line format
 ;; Normally the buffer name is right-padded with whitespace until it
 ;; is at least 12 characters. This is a waste of space, so we
 ;; eliminate the padding here. Check the docstrings for more
@@ -79,7 +73,7 @@ spaces."
                        (radian--mode-line-align
                         (format-mode-line radian-mode-line-left)
                         (format-mode-line radian-mode-line-right))
-                       'fixedcase 'literal))))
+                       'fixedcase 'literal)))
 
 
 (require 'all-the-icons nil t)
@@ -120,6 +114,10 @@ bars in the modeline. `setq' will not."
   "Enable the `all-the-icons' option."
   :set #'+modeline--set-var-and-refresh-bars-fn)
 
+(defcustom +modeline-on-bottom t
+  "Use modeline or headerline to display"
+  :set #'+modeline--set-var-and-refresh-bars-fn)
+
 (defvar +modeline-format-alist ()
   "An alist of modeline formats defined with `def-modeline!'.
 
@@ -152,7 +150,8 @@ side of the modeline, and whose CDR is the right-hand side.")
 (defun +modeline-icon-displayable-p ()
   "Return non-nil if icons are displayable."
   (and +modeline-enable-icon
-       (display-graphic-p)))
+       (display-graphic-p)
+       (featurep 'all-the-icons)))
 
 (defun +modeline-active ()
   "Return non-nil if the selected window has an active modeline."
@@ -603,31 +602,55 @@ lines are selected, or the NxM dimensions of a block selection.")
 ;;
 ;;; Bootstrap
 
-(defvar +modeline--old-format (default-value 'mode-line-format))
-
-(define-minor-mode +modeline-mode
-  "TODO"
-  :init-value nil
-  :global nil
-  (cond
-   (+modeline-mode
-    (setq mode-line-format
-          (cons
-           "" '(+modeline-bar
-                +modeline-format-left
-                (:eval
-                 (propertize
-                  " "
-                  'display
-                  `((space :align-to (- (+ right right-fringe right-margin)
-                                        ,(string-width
-                                          (format-mode-line '("" +modeline-format-right))))))))
-                +modeline-format-right))))
-   ((setq mode-line-format +modeline--old-format))))
-
-(define-global-minor-mode +modeline-global-mode +modeline-mode +modeline-mode)
-
-(add-hook '+modeline-global-mode-hook #'size-indication-mode)
+(if +modeline-on-bottom
+    (progn
+      (defvar +modeline--old-format (default-value 'mode-line-format))
+      (define-minor-mode +modeline-mode
+        "TODO"
+        :init-value nil
+        :global nil
+        (cond
+         (+modeline-mode
+          (setq mode-line-format
+                (cons
+                 "" '(+modeline-bar
+                      +modeline-format-left
+                      (:eval
+                       (propertize
+                        " "
+                        'display
+                        `((space :align-to (- (+ right right-fringe right-margin)
+                                              ,(string-width
+                                                (format-mode-line '("" +modeline-format-right))))))))
+                      +modeline-format-right))))
+         ((setq mode-line-format +modeline--old-format))))
+      (define-global-minor-mode +modeline-global-mode +modeline-mode +modeline-mode)
+      (add-hook '+modeline-global-mode-hook #'size-indication-mode))
+  (progn
+    (defvar +headerline--old-format (default-value 'header-line-format))
+    (setq-default mode-line-format nil)
+    (define-minor-mode +headerline-mode
+      "TODO"
+      :init-value nil
+      :global nil
+      (cond
+       (+headerline-mode
+        (setq header-line-format
+              (cons
+               "" '(+modeline-bar
+                    +modeline-format-left
+                    (:eval
+                     (propertize
+                      " "
+                      'display
+                      `((space :align-to (- (+ right right-fringe right-margin)
+                                            ,(string-width
+                                              (format-mode-line '("" +modeline-format-right))))))))
+                    +modeline-format-right))))
+       ((setq header-line-format +headerline--old-format))))
+    (define-global-minor-mode +headerline-global-mode +headerline-mode +headerline-mode)
+    (add-hook '+headerline-global-mode-hook #'size-indication-mode)
+    (global-hide-mode-line-mode +1)))
 
 (provide '+modeline)
 ;;; modeline.el ends here
