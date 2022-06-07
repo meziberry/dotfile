@@ -1,4 +1,4 @@
-;;; +modeline.el --- Insert description here -*- lexical-binding: t -*-
+;;; radian-modeline.el --- Insert description here -*- lexical-binding: t -*-
 ;;; Commentary:
 
 ;; This is a slimmed down version of `doom-modeline' that manipulates
@@ -112,10 +112,6 @@ bars in the modeline. `setq' will not."
 
 (defcustom +modeline-enable-icon t
   "Enable the `all-the-icons' option."
-  :set #'+modeline--set-var-and-refresh-bars-fn)
-
-(defcustom +modeline-on-bottom t
-  "Use modeline or headerline to display"
   :set #'+modeline--set-var-and-refresh-bars-fn)
 
 (defvar +modeline-format-alist ()
@@ -602,7 +598,7 @@ lines are selected, or the NxM dimensions of a block selection.")
 ;;
 ;;; Bootstrap
 
-(if +modeline-on-bottom
+(if (featurep! '+bottom)
     (progn
       (defvar +modeline--old-format (default-value 'mode-line-format))
       (define-minor-mode +modeline-mode
@@ -652,5 +648,5 @@ lines are selected, or the NxM dimensions of a block selection.")
     (add-hook '+headerline-global-mode-hook #'size-indication-mode)
     (global-hide-mode-line-mode +1)))
 
-(provide '+modeline)
-;;; modeline.el ends here
+(provide 'radian-modeline)
+;;; radian-modeline.el ends here

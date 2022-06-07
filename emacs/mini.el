@@ -102,13 +102,13 @@ dependencies or long-term shared data. Must end with a slash.")
 (defgroup radian-hooks nil
   "Startup hooks for Radian Emacs."
   :group 'radian
-  :link '(url-link :tag "GitHub" "https://github.com/raxod502"))
+  :link '(url-link :tag "GitHub" "https://github.com/radian-software"))
 
 (defgroup radian nil
   "Customize your Radian Emacs experience."
   :prefix "radian-"
   :group 'emacs
-  :link '(url-link :tag "GitHub" "https://github.com/raxod502"))
+  :link '(url-link :tag "GitHub" "https://github.com/radian-software"))
 
 (defcustom radian-first-input-hook nil
   "Transient hooks run before the first user input."
@@ -1429,7 +1429,7 @@ binding the variable dynamically over the entire init-file."
   (unless (file-exists-p bootstrap-file)
     (with-current-buffer
         (url-retrieve-synchronously
-         "https://raw.githubusercontent.com/raxod502/straight.el/develop/install.el"
+         "https://raw.githubusercontent.com/radian-software/straight.el/develop/install.el"
          'silent 'inhibit-cookies)
       (goto-char (point-max))
       (eval-print-last-sexp)))
@@ -1533,7 +1533,7 @@ binding the variable dynamically over the entire init-file."
 ;; el-patch
 (w el-patch :custom (el-patch-enable-use-package-integration . nil))
 ;; Only needed at compile time, thanks to Jon
-;; <https://github.com/raxod502/el-patch/pull/11>.
+;; <https://github.com/radian-software/el-patch/pull/11>.
 (eval-when-compile (require 'el-patch))
 
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
@@ -3226,7 +3226,7 @@ and cannot run in."
         show-paren-when-point-in-periphery t))
 
 (z apheleia
-  :straight (apheleia :host github :repo "raxod502/apheleia")
+  :straight (apheleia :host github :repo "radian-software/apheleia")
   :init
 
   (apheleia-global-mode +1)

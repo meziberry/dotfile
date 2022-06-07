@@ -239,16 +239,17 @@ KEY-NAME, COMMAND, and PREDICATE are as in `-key'."
 
 ;;; MODULE {option-packages}
 (defvar radian-disabled-packages nil
-  "List of packages that Radian should not load.
-If the list starts with `:not', packages that are not part of this
-list are not loaded instead. This variable should be modified in
-`radian-before-straight-hook' to be effective.")
+  "List of packages that Radian should not load.")
+
+(defvar radian-enabled-features '(+bottom)
+  "List of radian feature switch enabled")
 
 (defun featurep! (package)
   "Return nil if PACKAGE should not be loaded by Radian."
   (declare (indent defun))
   (if (symbolp package)
-      (not (memq package radian-disabled-packages))
+      (or (not (memq package radian-disabled-packages))
+          (memq package radian-enabled-features))
     (let ((p (car package)))
       (cond ((eq p :or) (cl-some #'featurep! (cdr package)))
             ((eq p :and) (cl-every #'featurep! (cdr package)))
@@ -432,21 +433,14 @@ hook directly into the init-file during byte-compilation."
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
 (defun init-coding-system-h ()
-  (if *WINDOWS
-      (progn
-        (set-clipboard-coding-system 'utf-16-le)
-        (set-selection-coding-system 'utf-16-le))
-    (set-selection-coding-system 'utf-8)
-    (set-next-selection-coding-system 'utf-8))
-  (when (fboundp 'set-charset-priority) (set-charset-priority 'unicode))
-  (prefer-coding-system 'utf-8-unix)
-  (set-language-environment "UTF-8")
-  (set-default-coding-systems 'utf-8-unix)
-  (set-terminal-coding-system 'utf-8-unix)
-  (set-keyboard-coding-system 'utf-8-unix)
-  (setq locale-coding-system 'utf-8-unix)
+  ;; (set-language-environment "UTF-8")
+  (set-locale-environment "en_US.UTF-8")
+  (when *WINDOWS
+    (set-clipboard-coding-system 'utf-16-le)
+    (set-selection-coding-system 'utf-16-le))
   ;; Treat clipboard input as UTF-8 string first; compound text next, etc.
-  (if (display-graphic-p) (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING))))
+  (if (display-graphic-p)
+      (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING))))
 (add-hook 'before-init-hook #'init-coding-system-h 'append)
 
 ;; Performance on Windows is considerably worse than elsewhere. We'll need
@@ -496,6 +490,36 @@ hook directly into the init-file during byte-compilation."
 ;; external) use it anyway, leading to a void-function error, so define a no-op
 ;; substitute to suppress them.
 (unless (fboundp 'define-fringe-bitmap) (fset 'define-fringe-bitmap #'ignore))
+
+;;;; Saving files
+
+;; Don't generate backups or lockfiles. While auto-save maintains a copy so long
+;; as a buffer is unsaved, backups create copies once, when the file is first
+;; written, and never again until it is killed and reopened. This is better
+;; suited to version control, and I don't want world-readable copies of
+;; potentially sensitive material floating around our filesystem.
+(setq create-lockfiles nil
+      make-backup-files nil
+      ;; But in case the user does enable it, some sensible defaults:
+      version-control t     ; number each backup file
+      backup-by-copying t   ; instead of renaming current file (clobbers links)
+      delete-old-versions t ; clean up after itself
+      kept-old-versions 5
+      kept-new-versions 5
+      tramp-backup-directory-alist backup-directory-alist)
+
+;; But turn on auto-save, so we have a fallback in case of crashes or lost data.
+;; Use `recover-file' or `recover-session' to recover them.
+(setq auto-save-default t
+      ;; Don't auto-disable auto-save after deleting big chunks. This defeats
+      ;; the purpose of a failsafe. This adds the risk of losing the data we
+      ;; just deleted, but I believe that's VCS's jurisdiction, not ours.
+      auto-save-include-big-deletions t
+      auto-save-file-name-transforms
+      (list (list "\\`/[^/]*:\\([^/]*/\\)*\\([^/]*\\)\\'"
+                  ;; Prefix tramp autosaves to prevent conflicts with local ones
+                  (concat auto-save-list-file-prefix "tramp-\\2") t)
+            (list ".*" auto-save-list-file-prefix t)))
 
 ;;;; EasyPG/EPG(GNU Privacy Guard(GnuPG))
 (after! epa
@@ -904,13 +928,12 @@ into `regexp-search-ring'"
 
   :blackout
   (meow-normal-mode meow-motion-mode meow-keypad-mode meow-insert-mode meow-beacon-mode))
-
+
+
+
 ;;; MODULE {Radian-foundation}
 ;; Autoload files
-(sup `(rautol
-       :local-repo ,(-radian/ "emacs/autoload") :type nil :build (:not compile)))
-(sup `(lautol
-       :local-repo ,(-local/ "emacs/autoload") :type nil :build (:not compile)))
+(sup `(rauto :local-repo ,(-radian/ "emacs/autoload") :type nil :build (:not compile)))
 
 ;;;; gcmh-mode
 (w gcmh/k)
@@ -1449,8 +1472,10 @@ unquote it using a comma."
          ;; Free up the right option for character composition
          mac-right-option-modifier 'none))
   (*WINDOWS
-   (setq w32-lwindow-modifier 'super
-         w32-rwindow-modifier 'super)))
+   (setq w32-apps-modifier 'hyper
+         w32-pass-app-to-system nil
+         w32-pass-lwindow-to-system nil
+         w32-lwindow-modifier 'super)))
 
 ;; HACK Fixes Emacs' disturbing inability to distinguish C-i from TAB.
 (define-key
@@ -1881,7 +1906,7 @@ ourselves."
 ;; Feature `auth-source' reads and writes secrets from files like
 ;; ~/.netrc for TRAMP and related packages, so for example you can
 ;; avoid having to type in a particular host's password every time.
-(z auth-source
+(b auth-source
   :config
   ;; Emacs stores `authinfo' in $HOME and in plain-text. Let's not do that, mkay?
   ;; This file stores usernames, passwords, and other such treasures for the
@@ -1924,7 +1949,7 @@ password that the user has decided not to save.")
           (funcall func file add))))))
 
 ;;;;; popup system
-(z popup/e
+(b popup/e
   :straight
   `(popup :local-repo ,(-contrib/ "popup/") :type nil
           :files ("*.el" "autoload/*.el")
@@ -2043,7 +2068,7 @@ Return nil when horizontal scrolling has moved it off screen."
 ;; S-down to move between windows. This is much more convenient and
 ;; efficient than using the default binding, C-x o, to cycle through
 ;; all of them in an essentially unpredictable order.
-(z windmove
+(b windmove
   ;; Avoid using `windmove-default-keybindings' due to
   ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=50430.
   :bind
@@ -2080,7 +2105,7 @@ Return nil when horizontal scrolling has moved it off screen."
   (setq ibuffer-old-time 48))
 
 ;;;; isearch
-(z isearch/k
+(b isearch/k
   ;; use my prefer search workflow.
   :bind ((minibuffer-local-isearch-map
           ([?\t]      . isearch-complete-edit)
@@ -2152,7 +2177,7 @@ or if the current buffer is read-only or not file-visiting."
   (add-hook! '(ediff-prepare-buffer-hook ediff-quit-hook) #'toggle-radian-highlight-long-lines-mode))
 
 ;;;; recentf-mode
-(z recentf
+(b recentf
   :increment easymenu tree-widget timer
   :commands recentf-open-files
   :setq-default (history-length . 100)
@@ -2162,7 +2187,10 @@ or if the current buffer is read-only or not file-visiting."
   ;; The most sensible time to clean up your recent files list is when you quit
   ;; Emacs (unless this is a long-running daemon session).
   `(recentf-auto-cleanup . ,(if (daemonp) 300 "11:00pm"))
-  :config (advice-add #'recentf-save-list :around #'fn-quiet!))
+  :config
+  ;; Anything in the runtime folders (i.e. $XDG_RUNTIME_DIR)
+  (add-to-list 'recentf-exclude "^/run")
+  (advice-add #'recentf-save-list :around #'fn-quiet!))
 
 ;;;; Text formatting
 (add-to-list 'safe-local-variable-values '(auto-fill-function . nil))
@@ -2288,7 +2316,7 @@ newline."
 ;; Feature `outline' provides major and minor modes for collapsing
 ;; sections of a buffer into an outline-like format.
 ;;;; Outline
-(z outline
+(b outline
   :config
   (setq-local outline-heading-alist
               '((";;; " . 1) (";;;; " . 2) (";;;;; " . 3)
@@ -2315,14 +2343,14 @@ newline."
         (setq last-repeatable-command repeat-previous-repeated-command))))
 
 ;; Feature `warnings' allows us to enable and disable warnings.
-(z warnings/e
+(b warnings/e
   :config
   ;; Ignore the warning we get when a huge buffer is reverted and the
   ;; undo information is too large to be recorded.
   (add-to-list 'warning-suppress-log-types '(undo discard-info)))
 
 ;;;; `cua' rectangle edit
-(z cua-base
+(b cua-base
   :init (cua-selection-mode t)
   ;; disable `delete-selection-mode'
   :custom (cua-delete-selection . nil))
@@ -2347,19 +2375,6 @@ newline."
 ;;; HEAD-CORE 
 (eval-unless! mini-p
 
-;;;; which-key
-;; Package `which-key' displays the key bindings and associated
-;; commands following the currently-entered key prefix in a popup.
-(w which-key/k
-  :init (which-key-mode +1)
-  :custom
-  ;; We configure it so that `which-key' is triggered by typing C-h
-  ;; during a key sequence (the usual way to show bindings). See
-  ;; <https://github.com/justbur/emacs-which-key#manual-activation>.
-  (which-key-show-early-on-C-h . t)
-  (which-key-idle-delay . most-positive-fixnum)
-  (which-key-idle-secondary-delay . 1e-100))
-
 ;;; MODULE {Vertico}
 ;;;; Complation supported by `vertico'
 (z vertico
@@ -2367,6 +2382,15 @@ newline."
                      :files ("*.el" "extensions/*.el"))
   :bind (radian-comma-keymap ("&" . vertico-repeat))
   :hook radian-first-input-hook
+  :init
+  (defadvice! +vertico-crm-indicator-a (args)
+    :filter-args #'completing-read-multiple
+    (cons (format "[CRM%s] %s"
+                  (replace-regexp-in-string
+                   "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+                   crm-separator)
+                  (car args))
+          (cdr args)))
   :chord (:vertico-map (".." . vertico-quick-exit))
   :config
   (setq vertico-resize nil
@@ -2383,7 +2407,7 @@ newline."
   (-key "DEL" #'vertico-directory-delete-char 'vertico-map)
 
   ;; These commands are problematic and automatically show the *Completions* buffer
-  ;; (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
+  (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
   (declare-function ffap-menu-ask "ffap")
   (eval-after-load 'ffap
     '(advice-add #'ffap-menu-ask
@@ -2477,12 +2501,16 @@ orderless."
     (radian-comma-keymap
      ("g"  . project-or-external-find-regexp)
      ("/"  . +vertico/project-search)
-     ("fr" . consult-recent-file)
+     ("l." . locate)
+     ("fr" . recentf-open-files)
      ("ff" . +vertico/consult-fd))))
 
   (advice-add #'multi-occur :override #'consult-multi-occur)
 
   :defer-config
+  (when *WINDOWS
+    ;; On windows, use the Everything and Everything-cli to locate.
+    (setq consult-locate-args (encode-coding-string "es.exe -i -p -r" 'utf-8)))
 
   (defadvice! +vertico--consult-recent-file-a (&rest _args)
     "`consult-recent-file' needs to have `recentf-mode' on to work correctly"
@@ -2548,7 +2576,6 @@ orderless."
                     :files ("embark-consult.el" "embark.el" "embark.texi"
                             "avy-embark-collect.el"))
   :pre-setq
-  (which-key-use-C-h-commands . nil)
   (prefix-help-command . #'embark-prefix-help-command)
   :init
   (-keys (minibuffer-local-map
@@ -2562,16 +2589,6 @@ orderless."
   ("C-x g" . (cmds! (featurep 'magit-status) #'magit-status #'+vertico/embark-magit-status))
   :hook (embark-collect-mode-hook . consult-preview-at-point-mode)
   :config
-  (defadvice! +vertico--embark-which-key-prompt-a (fn &rest args)
-    "Hide the which-key indicator immediately when using the
-completing-read prompter."
-    :around #'embark-completing-read-prompter
-    (which-key--hide-popup-ignore-command)
-    (let ((embark-indicators
-           (remq 'embark-which-key-indicator embark-indicators)))
-      (apply fn args)))
-  (cl-nsubstitute #'+vertico-embark-which-key-indicator #'embark-mixed-indicator embark-indicators)
-
   (eval-after-load 'consult '(require 'embark-consult)))
 
 (w marginalia
@@ -2597,7 +2614,7 @@ completing-read prompter."
 
 ;;; MODULE {files}
 ;;;; Project
-(z project/k
+(b project/k
   :init
   (setq project-switch-commands
         '((project-find-file "File" ?f)
@@ -2660,36 +2677,6 @@ DIR must include a .project file to be considered a project."
   :defer-config
   (add-hook 'project-find-functions #'+project--try-local))
 
-;;;; Saving files
-
-;; Don't generate backups or lockfiles. While auto-save maintains a copy so long
-;; as a buffer is unsaved, backups create copies once, when the file is first
-;; written, and never again until it is killed and reopened. This is better
-;; suited to version control, and I don't want world-readable copies of
-;; potentially sensitive material floating around our filesystem.
-(setq create-lockfiles nil
-      make-backup-files nil
-      ;; But in case the user does enable it, some sensible defaults:
-      version-control t     ; number each backup file
-      backup-by-copying t   ; instead of renaming current file (clobbers links)
-      delete-old-versions t ; clean up after itself
-      kept-old-versions 5
-      kept-new-versions 5
-      tramp-backup-directory-alist backup-directory-alist)
-
-;; But turn on auto-save, so we have a fallback in case of crashes or lost data.
-;; Use `recover-file' or `recover-session' to recover them.
-(setq auto-save-default t
-      ;; Don't auto-disable auto-save after deleting big chunks. This defeats
-      ;; the purpose of a failsafe. This adds the risk of losing the data we
-      ;; just deleted, but I believe that's VCS's jurisdiction, not ours.
-      auto-save-include-big-deletions t
-      auto-save-file-name-transforms
-      (list (list "\\`/[^/]*:\\([^/]*/\\)*\\([^/]*\\)\\'"
-                  ;; Prefix tramp autosaves to prevent conflicts with local ones
-                  (concat auto-save-list-file-prefix "tramp-\\2") t)
-            (list ".*" auto-save-list-file-prefix t)))
-
 (defun radian-set-executable-permission (allowed)
   "Enable or disable executable permission on the current file.
 If ALLOWED is non-nil, enable permission; otherwise, disable
@@ -2726,33 +2713,6 @@ permission."
   (setq hs-set-up-overlay 'hideshow-folded-overlay-fn)
 
   :blackout hs-minor-mode)
-
-;;;; Kill and yank
-(defadvice! radian--advice-stop-kill-at-whitespace
-  (kill-line &rest args)
-  "Prevent `kill-line' from killing through whitespace to a newline.
-This affects the case where you press \\[kill-line] when point is
-followed by some whitespace and then a newline. Without this
-advice, \\[kill-line] will kill both the whitespace and the
-newline, which is inconsistent with its behavior when the
-whitespace is replaced with non-whitespace. With this advice,
-\\[kill-line] will kill just the whitespace, and another
-invocation will kill the newline."
-  :around #'kill-line
-  (let ((show-trailing-whitespace t))
-    (apply kill-line args)))
-
-;; Eliminate duplicates in the kill ring. That is, if you kill the
-;; same thing twice, you won't have to use M-y twice to get past it to
-;; older entries in the kill ring.
-(setq kill-do-not-save-duplicates t)
-
-(defadvice! radian--advice-disallow-password-copying (func &rest args)
-  "Don't allow copying a password to the kill ring."
-  :around #'read-passwd
-  (cl-letf (((symbol-function #'kill-new) #'ignore)
-            ((symbol-function #'kill-append) #'ignore))
-    (apply func args)))
 
 ;;;; Undo/redo
 
@@ -2809,7 +2769,7 @@ invocation will kill the newline."
 
 ;; Feature `bookmark' provides a way to mark places in a buffer. I
 ;; don't use it, but some other packages do.
-(z bookmark
+(b bookmark
   :config
 
   (dolist (func '(bookmark-load bookmark-write-file))
@@ -2817,7 +2777,7 @@ invocation will kill the newline."
 
 ;; Feature `fileloop' provides the underlying machinery used to do
 ;; operations on multiple files, such as find-and-replace.
-(z fileloop
+(b fileloop
   :when (version<= "27" emacs-version)
   :config
 
@@ -2940,7 +2900,7 @@ buffer."
               smartparens-strict-mode)))
 
 ;;;; prettify
-(z prog-mode
+(b prog-mode
   :init
   (defvar +ligatures-extras-in-modes t
     "List of major modes where extra ligatures should be enabled.
@@ -3021,70 +2981,7 @@ and cannot run in."
   ;; per mode with `ligature-mode'.
   (global-ligature-mode t))
 
-;;; MODULE {Electricity}: automatic things
-;;;; Autorevert
-
-;; On macOS, Emacs has a nice keybinding to revert the current buffer.
-;; On other platforms such a binding is missing; we re-add it here.
-
-
-;; Feature `autorevert' allows the use of file-watchers or polling in
-;; order to detect when the file visited by a buffer has changed, and
-;; optionally reverting the buffer to match the file (unless it has
-;; unsaved changes).
-(z autorevert
-  :init
-  (defun radian--autorevert-silence ()
-    "Silence messages from `auto-revert-mode' in the current buffer."
-    (setq-local auto-revert-verbose nil))
-
-  :hook (radian-first-file-hook . global-auto-revert-mode)
-  :config
-
-  ;; Turn the delay on auto-reloading from 5 seconds down to 1 second.
-  ;; We have to do this before turning on `auto-revert-mode' for the
-  ;; change to take effect. (Note that if we set this variable using
-  ;; `customize-set-variable', all it does is toggle the mode off and
-  ;; on again to make the change take effect, so that way is dumb.)
-  (setq auto-revert-interval 1)
-
-  (global-auto-revert-mode +1)
-
-  ;; Auto-revert all buffers, not only file-visiting buffers. The
-  ;; docstring warns about potential performance problems but this
-  ;; should not be an issue since we only revert visible buffers.
-  (setq global-auto-revert-non-file-buffers t)
-
-  ;; Since we automatically revert all visible buffers after one
-  ;; second, there's no point in asking the user whether or not they
-  ;; want to do it when they find a file. This disables that prompt.
-  (setq revert-without-query '(".*"))
-
-  (defun radian-autorevert-inhibit-p (buffer)
-    "Return non-nil if autorevert should be inhibited for BUFFER."
-    (or (null (get-buffer-window))
-        (with-current-buffer buffer
-          (or (null buffer-file-name)
-              (file-remote-p buffer-file-name)))))
-
-  (eval-if! (version< emacs-version "27")
-      (defadvice! radian--autorevert-only-visible
-        (auto-revert-buffers &rest args)
-        "Inhibit `autorevert' for buffers not displayed in any window."
-        :around #'auto-revert-buffers
-        (letf! ((defun buffer-list (&rest args)
-                  (cl-remove-if
-                   #'radian-autorevert-inhibit-p
-                   (apply buffer-list args))))
-          (apply auto-revert-buffers args)))
-    (defadvice! radian--autorevert-only-visible (bufs)
-      "Inhibit `autorevert' for buffers not displayed in any window."
-      :filter-return #'auto-revert--polled-buffers
-      (cl-remove-if #'radian-autorevert-inhibit-p bufs)))
-
-  :blackout auto-revert-mode)
-
-;;;; Automatic delimiter pairing
+;;; puni
 (w puni
   :hook (radian-first-buffer-hook . puni-global-mode)
   :init
@@ -3105,7 +3002,7 @@ and cannot run in."
 
 ;; Feature `abbrev' provides functionality for expanding user-defined
 ;; abbreviations. We prefer to use `yasnippet' instead, though.
-(z abbrev/k)
+(b abbrev/k)
 
 ;; Package `yasnippet' allows the expansion of user-defined
 ;; abbreviations into fillable templates. The only reason we have it
@@ -3199,7 +3096,7 @@ currently active.")
 ;;; MODULE {IDE features}
 ;;;; Virtual environments
 ;;;; xref
-(z xref
+(b xref
   :custom
   (xref-search-program . 'ripgrep)
   (xref-show-xrefs-function . #'xref-show-definitions-completing-read)
@@ -3217,32 +3114,29 @@ currently active.")
 ;;;; hl-todo
 (w hl-todo
   :hook ((prog-mode-hook yaml-mode-hook) . hl-todo-mode)
-
   :custom
   (hl-todo-highlight-punctuation . ":")
   (hl-todo-keyword-faces
    .
-   `(;; For things that need to be done, just not today.
+   '(;; For missing features or functionality that should be added at a
+     ;; later date.
      ("TODO" warning bold)
-     ;; For problems that will become bigger problems later if not
-     ;; fixed ASAP.
+     ;; For code (or code paths) that are broken or slow, and may become
+     ;; bigger problems later.
      ("FIXME" error bold)
-     ;; For tidbits that are unconventional and not intended uses of the
-     ;; constituent parts, and may break in a future update.
+     ;; For code smells, where questionable coding practices are
+     ;; intentionally used, and/or may break in a future update.
      ("HACK" font-lock-constant-face bold)
-     ;; For things that were done hastily and/or hasn't been thoroughly
-     ;; tested. It may not even be necessary!
+     ;; For things that need confirmation that they work or more testing.
      ("REVIEW" font-lock-keyword-face bold)
-     ;; For especially important gotchas with a given implementation,
-     ;; directed at another user other than the author.
-     ("NOTE" success bold)
      ;; For things that just gotta go and will soon be gone.
      ("DEPRECATED" font-lock-doc-face bold)
-     ;; For a known bug that needs a workaround
-     ("BUG" error bold)
      ;; For working in progress
      ("WIP" elisp-shorthand-font-lock-face bold)
-     ;; For warning about a problematic or misguiding code
+     ;; These are extra, commonly seen annotation keywords. What they mean
+     ;; or  are for depend on the project.
+     ("NOTE" success bold)
+     ("BUG" error bold)
      ("XXX" font-lock-constant-face bold)))
 
   :config
@@ -3491,7 +3385,8 @@ killed (which happens during Emacs shutdown)."
   :preface
   ;; corfu-english-helper
   (z corfu-english-helper
-    :straight (corfu-english-helper :host github :repo "manateelazycat/corfu-english-helper")
+    :straight (corfu-english-helper :host github
+                                    :repo "manateelazycat/corfu-english-helper")
     :init (-key "te" #'toggle-corfu-english-helper 'radian-comma-keymap))
 
   (defun smarter-tab-to-complete ()
@@ -3522,11 +3417,12 @@ If all failed, try to complete the common part with `corfu-complete'"
       (corfu-mode 1)))
   (add-hook 'minibuffer-setup-hook #'corfu-enable-in-minibuffer))
 
-(z corfu-popup
+(z corfu-terminal
   :after corfu
   :straight
   (popon :type git :repo "https://codeberg.org/akib/emacs-popon.git")
-  (corfu-popup :type git :repo "https://codeberg.org/akib/emacs-corfu-popup.git")
+  (corfu-terminal :type git
+                  :repo "https://codeberg.org/akib/emacs-corfu-terminal.git")
   :init (unless (display-graphic-p) (corfu-popup-mode +1)))
 
 (w cape/e
@@ -3807,7 +3703,7 @@ menu to disappear and then come back after `company-idle-delay'."
 
 ;; Feature `lisp-mode' provides a base major mode for Lisp languages,
 ;; and supporting functions for dealing with Lisp code.
-(z lisp-mode
+(b lisp-mode
   :bind
   ([remap eval-expression] . pp-eval-expression)
   :init
@@ -3983,7 +3879,7 @@ menu to disappear and then come back after `company-idle-delay'."
 
 ;; Feature `cc-mode' provides major modes for C, C++, Objective-C, and
 ;; Java.
-(z cc-mode
+(b cc-mode
 
   :defer-config
 
@@ -4173,7 +4069,7 @@ This works around an upstream bug; see
 ;;;; Makefile
 
 ;; Feature `make-mode' provides major modes for editing Makefiles.
-(z make-mode
+(b make-mode
   :blackout ((makefile-automake-mode . "Makefile")
              (makefile-gmake-mode . "Makefile")
              (makefile-makepp-mode . "Makefile")
@@ -4369,11 +4265,8 @@ Return either a string or nil."
 ;; Feature `js' provides a major mode `js-mode' for JavaScript. We
 ;; don't use it (because `web-mode' is better), but we still configure
 ;; some of its variables because `json-mode' uses them.
-(z js
-  :config
-
-  ;; Default is 4, and nobody should indent JSON with four spaces.
-  (setq js-indent-level 2))
+;; Default is 4, and nobody should indent JSON with four spaces.
+(b js :custom (js-indent-level . 2))
 
 ;; Package `web-mode' provides a major mode for HTML, CSS, JavaScript,
 ;; and every conceivable thing adjacent (TypeScript, JSX, TSX, PSP,
@@ -4571,6 +4464,29 @@ This function calls `json-mode--update-auto-mode' to change the
          ("rc\\'" . conf-mode)
          ("\\.\\(?:hex\\|nes\\)\\'" . hexl-mode)))
 
+;;;; nix
+(w nix-mode
+  :interpreter ("\\(?:cached-\\)?nix-shell" . +nix-shell-init-mode)
+  :mode "\\.nix\\'"
+  ;; :bind
+  ;; (nix-mode-map
+  ;;  ("f" . nix-update-fetch)
+  ;;  ("p" . nix-format-buffer)
+  ;;  ("r" . nix-repl-show)
+  ;;  ("s" . nix-shell)
+  ;;  ("b" . nix-build)
+  ;;  ("u" . nix-unpack)
+  ;;  ("o" . +nix/lookup-option))
+  :init
+  ;; Treat flake.lock files as json. Fall back to js-mode because it's faster
+  ;; than js2-mode, and its extra features aren't needed there.
+  (add-to-list 'auto-mode-alist '("/flake\\.lock\\'" . json-mode))
+  :config
+  (b nix-drv-mode :mode "\\.drv\\'")
+  (b nix-repl :commands nix-repl)
+
+  (set-popup-rule! "^\\*nixos-options-doc\\*$" :ttl 0 :quit t))
+
 ;;; Introspection
 ;;;; Help
 ;; Package `helpful' provides a complete replacement for the built-in
@@ -4664,11 +4580,9 @@ bizarre reason."
 
 ;; Feature `cus-edit' powers Customize buffers and related
 ;; functionality.
-(z cus-edit
-  :config
+;; Don't show the search box in Custom.
+(z cus-edit :custom  (custom-search-field . nil))
 
-  ;; Don't show the search box in Custom.
-  (setq custom-search-field nil))
 
 ;;;; Emacs Lisp development
 (defun radian-reload-init ()
@@ -4694,7 +4608,6 @@ bizarre reason."
   (load user-init-file nil 'nomessage)
   (message "Reloading init-file...done")
   (run-hooks radian-after-reload-hook))
-
 (radian-bind-key "r" #'radian-reload-init)
 
 
@@ -4750,14 +4663,13 @@ bizarre reason."
 
 ;; Feature `bytecomp' handles byte-compilation of Emacs Lisp code.
 (b bytecomp
-  :config
-
   ;; Eliminate two warnings that are essentially useless for me. The
   ;; `make-local' warning gets triggered every time you call
   ;; `define-minor-mode' inside of `leaf', and the `noruntime'
   ;; warning gets triggered basically all the time for everything.
-  (setq byte-compile-warnings '(not make-local noruntime))
+  :custom (byte-compile-warnings . '(not make-local noruntime))
 
+  :config
   (defun radian-batch-byte-compile ()
     "Byte-compile radian.el. For usage in batch mode."
     (byte-compile-file radian-lib-file))
@@ -4805,10 +4717,10 @@ messages."
 ;;;;; Emacs Lisp linting
 ;; Feature `checkdoc' provides some tools for validating Elisp
 ;; docstrings against common conventions.
-(z checkdoc
-  :init
+(b checkdoc
   ;; Not sure why this isn't included by default.
-  (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
+  :init (put 'checkdoc-package-keywords-flag 'safe-local-variable #'booleanp))
+
 
 ;; Package `elisp-lint', not installed, provides a linting framework
 ;; for Elisp code. We use `with-eval-after-load' because `leaf'
@@ -5179,12 +5091,19 @@ non-nil value to enable trashing for file operations."
   (advice-remove #'list-directory #'radian--use-gls-for-list-directory))
 
 ;; Feature `dired' provides a simplistic filesystem manager in Emacs.
-(z dired
+(b dired
   ;; This binding is way nicer than ^. It's inspired by
   ;; Sunrise Commander.
-  :bind (dired-mode-map ("J" . dired-up-directory))
+  :bind (dired-mode-map ("J" . dired-up-directory)
+                        ("e" . dired-open-externally))
   :bind* ("C-x w" . radian-rename-current-file)
-  :defer-config
+  :config
+  (defun dired-open-externally (&optional arg)
+    "Open marked or current file in operating system's default application."
+    (interactive "P")
+    (dired-map-over-marks
+     (consult-file-externally (dired-get-filename))
+     arg))
 
   (defun radian-rename-current-file (newname)
     "Rename file visited by current buffer to NEWNAME.
@@ -5244,11 +5163,10 @@ the problematic case.)"
   (setq dired-auto-revert-buffer #'dired-buffer-stale-p))
 
 (z dired-x
-  :bind (;; Bindings for jumping to the current directory in Dired.
-         ("C-x C-j" . dired-jump)
+  ;; Bindings for jumping to the current directory in Dired.
+  :bind (("C-x C-j" . dired-jump)
          ("C-x 4 C-j" . dired-jump-other-window))
   :config
-
   ;; Prevent annoying "Omitted N lines" messages when auto-reverting.
   (setq dired-omit-verbose nil)
 
@@ -5263,12 +5181,12 @@ are probably not going to be installed."
 
 
 ;; find-name-dired find stuff from different directory.
-(z find-dired :setq (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
+(b find-dired :custom (find-ls-option . '("-print0 | xargs -0 ls -ld" . "-ld")))
 
 ;;;; Terminal emulator
-
-(setq explicit-shell-file-name "c:/msys/usr/bin/zsh.exe")
-(setq shell-file-name "zsh")
+(when *WINDOWS
+  (setq explicit-shell-file-name "c:/msys/usr/bin/zsh.exe")
+  (setq shell-file-name "c:/msys/usr/bin/zsh.exe"))
 (setq explicit-zsh.exe-args '("--login" "-i"))
 (setenv "SHELL" shell-file-name)
 (add-hook 'comint-output-filter-functions #'comint-strip-ctrl-m)
@@ -5282,7 +5200,7 @@ are probably not going to be installed."
          ("C-h" . help-command)))
 
 (eval-unless! *WINDOWS "vterm cannot run on Windows"
-(z vterm
+(b vterm
   :bind (vterm-mode-map
          ("C-y" . vterm-yank)
          ("M-y" . vterm-yank-pop)
@@ -5665,7 +5583,7 @@ Instead, display simply a flat colored region in the fringe."
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
 (eval-unless! "WIP"
-(z browse-url
+(b browse-url
   :bind ("C-c C-o" . (cmds! (radian--browse-url-predicate) #'browse-url-at-point))
   :init
   (defun radian--browse-url-predicate ()
@@ -5793,7 +5711,7 @@ Instead, display simply a flat colored region in the fringe."
 
 ;;; MODULE {Appearance}
 ;;;; tab-bar
-(z tab-bar
+(b tab-bar
   :init
   (defun +tab-bar-right ()
     (let* ((p (or (radian-project-root) ""))
@@ -5818,7 +5736,8 @@ Instead, display simply a flat colored region in the fringe."
   ([remap project-switch-project] . +tab-bar-switch-project)
   (radian-comma-keymap ("tp" . tab-bar-switch-to-prev-tab)
                        ("tn" . tab-bar-switch-to-next-tab)
-                       ("tc" . tab-bar-close-tab))
+                       ("tc" . (cmd! (project-kill-buffers t)
+                                     (tab-bar-close-tab))))
   :custom (tab-bar-new-tab-choice . "*scratch*")
   :setq
   (tab-bar-border . nil)
@@ -5895,8 +5814,36 @@ No tab will created if the command is cancelled."
 
 
 
+
+;;;; Kill and yank
+(defadvice! radian--advice-stop-kill-at-whitespace
+  (kill-line &rest args)
+  "Prevent `kill-line' from killing through whitespace to a newline.
+This affects the case where you press \\[kill-line] when point is
+followed by some whitespace and then a newline. Without this
+advice, \\[kill-line] will kill both the whitespace and the
+newline, which is inconsistent with its behavior when the
+whitespace is replaced with non-whitespace. With this advice,
+\\[kill-line] will kill just the whitespace, and another
+invocation will kill the newline."
+  :around #'kill-line
+  (let ((show-trailing-whitespace t))
+    (apply kill-line args)))
+
+;; Eliminate duplicates in the kill ring. That is, if you kill the
+;; same thing twice, you won't have to use M-y twice to get past it to
+;; older entries in the kill ring.
+(setq kill-do-not-save-duplicates t)
+
+(defadvice! radian--advice-disallow-password-copying (func &rest args)
+  "Don't allow copying a password to the kill ring."
+  :around #'read-passwd
+  (cl-letf (((symbol-function #'kill-new) #'ignore)
+            ((symbol-function #'kill-append) #'ignore))
+    (apply func args)))
+
 ;;;; pulse.el
-(z pulse
+(b pulse
   :defvar pulse-delay
   :config
   (defface radian-pulse-line
@@ -5931,7 +5878,7 @@ No tab will created if the command is cancelled."
 ;; important! It also provides the major mode for the *scratch*
 ;; buffer, which is very similar but slightly different. Not as
 ;; important.
-(z elisp-mode
+(b elisp-mode
   :config
   (defun radian/headerise-elisp ()
     "Add minimal header and footer to an elisp buffer in order to placate flycheck."
@@ -6037,7 +5984,7 @@ SYMBOL is as in `xref-find-definitions'."
         ("C-h C-e" . view-echo-area-messages)))
 
 ;; Feature `help' powers the *Help* buffer and related functionality.
-(z help
+(b help
   :bind
   ;; Aviod visiting HELLO file accidentally.
   ("C-h h" . nil)
@@ -6081,7 +6028,7 @@ unhelpful."
 ;; Feature `eldoc' provides a minor mode (enabled by default in Emacs
 ;; 25) which allows function signatures or other metadata to be
 ;; displayed in the echo area.
-(z eldoc/ek
+(b eldoc/ek
   :custom
   ;; Always truncate ElDoc messages to one line. This prevents the
   ;; echo area from resizing itself unexpectedly when point is on a
@@ -6121,6 +6068,96 @@ was printed, and only have ElDoc display if one wasn't."
     :override #'eldoc--message-command-p
     (member (current-message) (list nil eldoc-last-message))))
 
+;;;; Automatic delimiter pairing
+(b paren
+  ;; highlight matching delimiters
+  :hook (radian-first-buffer-hook . show-paren-mode)
+  :custom
+  (show-paren-delay . 0.1)
+  (show-paren-highlight-openparen . t)
+  (show-paren-when-point-inside-paren . t)
+  (show-paren-when-point-in-periphery . t))
+
+(b electric
+  :init
+  (add-hook 'minibuffer-setup-hook
+            (lambda (&rest _) (electric-pair-local-mode -1)))
+  :custom
+  (electric-pair-inhibit-predicate . 'electric-pair-conservative-inhibit)
+  (electric-pair-preserve-balance . t)
+  (electric-pair-pairs . '((8216 . 8217)(8220 . 8221)(171 . 187)))
+  (electric-pair-skip-self . 'electric-pair-default-skip-self)
+  (electric-pair-skip-whitespace . nil)
+  (electric-pair-skip-whitespace-chars . '(9 10 32))
+  (electric-quote-context-sensitive . t)
+  (electric-quote-paragraph . t)
+  (electric-quote-string . nil)
+  (electric-quote-replace-double . t)
+  :defer-config
+  (electric-pair-mode +1)
+  (electric-quote-mode -1))
+
+;;;; Autorevert
+
+;; On macOS, Emacs has a nice keybinding to revert the current buffer.
+;; On other platforms such a binding is missing; we re-add it here.
+
+
+;; Feature `autorevert' allows the use of file-watchers or polling in
+;; order to detect when the file visited by a buffer has changed, and
+;; optionally reverting the buffer to match the file (unless it has
+;; unsaved changes).
+(b autorevert
+  :init
+  (defun radian--autorevert-silence ()
+    "Silence messages from `auto-revert-mode' in the current buffer."
+    (setq-local auto-revert-verbose nil))
+
+  :hook (radian-first-file-hook . global-auto-revert-mode)
+  :config
+
+  ;; Turn the delay on auto-reloading from 5 seconds down to 1 second.
+  ;; We have to do this before turning on `auto-revert-mode' for the
+  ;; change to take effect. (Note that if we set this variable using
+  ;; `customize-set-variable', all it does is toggle the mode off and
+  ;; on again to make the change take effect, so that way is dumb.)
+  (setq auto-revert-interval 1)
+
+  (global-auto-revert-mode +1)
+
+  ;; Auto-revert all buffers, not only file-visiting buffers. The
+  ;; docstring warns about potential performance problems but this
+  ;; should not be an issue since we only revert visible buffers.
+  (setq global-auto-revert-non-file-buffers t)
+
+  ;; Since we automatically revert all visible buffers after one
+  ;; second, there's no point in asking the user whether or not they
+  ;; want to do it when they find a file. This disables that prompt.
+  (setq revert-without-query '(".*"))
+
+  (defun radian-autorevert-inhibit-p (buffer)
+    "Return non-nil if autorevert should be inhibited for BUFFER."
+    (or (null (get-buffer-window))
+        (with-current-buffer buffer
+          (or (null buffer-file-name)
+              (file-remote-p buffer-file-name)))))
+
+  (eval-if! (version< emacs-version "27")
+      (defadvice! radian--autorevert-only-visible
+        (auto-revert-buffers &rest args)
+        "Inhibit `autorevert' for buffers not displayed in any window."
+        :around #'auto-revert-buffers
+        (letf! ((defun buffer-list (&rest args)
+                  (cl-remove-if
+                   #'radian-autorevert-inhibit-p
+                   (apply buffer-list args))))
+          (apply auto-revert-buffers args)))
+    (defadvice! radian--autorevert-only-visible (bufs)
+      "Inhibit `autorevert' for buffers not displayed in any window."
+      :filter-return #'auto-revert--polled-buffers
+      (cl-remove-if #'radian-autorevert-inhibit-p bufs)))
+
+  :blackout auto-revert-mode)
 
 ;;;; Code reformatting
 
@@ -6171,7 +6208,7 @@ was printed, and only have ElDoc display if one wasn't."
 
 ;;;; Appearance
 ;;;; pixel-scroll
-(z pixel-scroll
+(b pixel-scroll
   :emacs>= 29
   :defun pixel-scroll-precision-mode
   :custom
@@ -6341,7 +6378,7 @@ turn it off again after creating the first frame."
 (req! font)
 
 ;;;; mode-line
-(b +modeline/e
+(b radian-modeline/e
   :custom
   (+modeline-height . 20)
   (+modeline-enable-icon . t)
@@ -6574,12 +6611,6 @@ bound dynamically before being used.")
 ;; entirely.
 (setq echo-keystrokes 1e-6)
 
-;; Unfortunately, `which-key' sets an internal variable at load time
-;; based on the value of `echo-keystrokes', and then later overrides
-;; `echo-keystrokes' to the value of this internal variable,
-;; effectively overwriting our configuration here. Stop that behavior.
-(z which-key/m :config (setq which-key-echo-keystrokes echo-keystrokes))
-
 (after! comint
   (setq comint-prompt-read-only t
         comint-buffer-maximum-size 2048)) ; double the default
@@ -6602,7 +6633,6 @@ bound dynamically before being used.")
 (setq blink-matching-paren nil)
 
 ;; Typing yes/no is obnoxious when y/n will do
-;; (advice-add #'yes-or-no-p :override #'y-or-n-p)
 (setq use-short-answers t)
 
 ;; Enable all disabled commands.
@@ -6694,18 +6724,18 @@ the unwritable tidbits."
 (setq radian--current-feature 'normal)
 
 (unless (or mini-p (bound-and-true-p radian--currently-profiling-p))
+  ;; We should only get here if init was successful. If we do,
+  ;; byte-compile this file asynchronously in a subprocess using the
+  ;; Radian Makefile. That way, the next startup will be fast(er).
+  ;; (run-with-idle-timer 1 nil #'radian-byte-compile)
+
   ;; Prune the build cache for straight.el; this will prevent it from
   ;; growing too large. Do this after the final hook to prevent packages
   ;; installed there from being pruned.
   (straight-prune-build-cache)
   ;; Occasionally prune the build directory as well. For similar reasons
   ;; as above, we need to do this after local configuration.
-  (if (= 0 (random 100)) (straight-prune-build-directory))
-
-  ;; We should only get here if init was successful. If we do,
-  ;; byte-compile this file asynchronously in a subprocess using the
-  ;; Radian Makefile. That way, the next startup will be fast(er).
-  (run-with-idle-timer 1 nil #'radian-byte-compile))
+  (if (= 0 (random 100)) (straight-prune-build-directory)))
 
 ;;; Bootstrap interactive session
 
@@ -6745,6 +6775,10 @@ the unwritable tidbits."
   (radian-run-hook-on 'radian-first-file-hook   '(find-file-hook dired-initial-position-hook))
   (radian-run-hook-on 'radian-first-input-hook  '(pre-command-hook))
   (add-hook 'radian-first-buffer-hook #'gcmh-mode))
+
+
+
+;; (autoload #'file-notify-rm-all-watches "filenotify")
 
 ;; Local Variables:
 ;; checkdoc-symbol-words: ("top-level")

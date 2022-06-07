@@ -180,7 +180,7 @@ tools (e.g. `embark')."
   (pcase-let* ((cmd (split-string-and-unquote +vertico-consult-fd-args))
                (`(,arg . ,opts) (consult--command-split input))
                (`(,re . ,hl) (funcall consult--regexp-compiler
-                                      arg 'extended)))
+                                      arg 'extended t)))
     (when re
       (list :command (append cmd
                              (list (consult--join-regexps re 'extended))

@@ -56,20 +56,6 @@ BUF should be skipped over by functions like `next-buffer' and `other-buffer'."
 (defalias 'radian-buffer-list #'buffer-list)
 
 ;;;###autoload
-(defun radian-project-buffer-list (&optional project)
-  "Return a list of buffers belonging to the specified PROJECT.
-
-If PROJECT is nil, default to the current project.
-
-If no project is active, return all buffers."
-  (let ((buffers (radian-buffer-list)))
-    (if-let* ((project-root
-               (if project (expand-file-name project)
-                 (radian-project-root))))
-        (project--buffer-list project)
-      buffers)))
-
-;;;###autoload
 (defun radian-open-projects ()
   "Return a list of projects with open buffers."
   (cl-loop with projects = (make-hash-table :test 'equal :size 8)
@@ -287,85 +273,10 @@ If DONT-SAVE, don't prompt to save modified buffers (discarding their changes)."
       (set-buffer-modified-p nil)))
   (radian-kill-buffer-fixup-windows buffer))
 
-
 (defun radian--message-or-count (interactive message count)
   (if interactive
       (message message count)
     count))
-
-;;;###autoload
-(defun radian/kill-all-buffers (&optional buffer-list interactive)
-  "Kill all buffers and closes their windows.
-
-If the prefix arg is passed, doesn't close windows and only kill buffers that
-belong to the current project."
-  (interactive
-   (list (if current-prefix-arg
-             (radian-project-buffer-list)
-           (radian-buffer-list))
-         t))
-  (if (null buffer-list)
-      (message "No buffers to kill")
-    (save-some-buffers)
-    (delete-other-windows)
-    (when (memq (current-buffer) buffer-list)
-      (switch-to-buffer (radian-fallback-buffer)))
-    (mapc #'kill-buffer buffer-list)
-    (radian--message-or-count
-     interactive "Killed %d buffers"
-     (- (length buffer-list)
-        (length (cl-remove-if-not #'buffer-live-p buffer-list))))))
-
-;;;###autoload
-(defun radian/kill-other-buffers (&optional buffer-list interactive)
-  "Kill all other buffers (besides the current one).
-
-If the prefix arg is passed, kill only buffers that belong to the current
-project."
-  (interactive
-   (list (delq (current-buffer)
-               (if current-prefix-arg
-                   (radian-project-buffer-list)
-                 (radian-buffer-list)))
-         t))
-  (mapc #'radian-kill-buffer-and-windows buffer-list)
-  (radian--message-or-count
-   interactive "Killed %d other buffers"
-   (- (length buffer-list)
-      (length (cl-remove-if-not #'buffer-live-p buffer-list)))))
-
-;;;###autoload
-(defun radian/kill-matching-buffers (pattern &optional buffer-list interactive)
-  "Kill buffers that match PATTERN in BUFFER-LIST.
-
-If the prefix arg is passed, only kill matching buffers in the current project."
-  (interactive
-   (list (read-regexp "Buffer pattern: ")
-         (if current-prefix-arg
-             (radian-project-buffer-list)
-           (radian-buffer-list))
-         t))
-  (radian-kill-matching-buffers pattern buffer-list)
-  (when interactive
-    (message "Killed %d buffer(s)"
-             (- (length buffer-list)
-                (length (cl-remove-if-not #'buffer-live-p buffer-list))))))
-
-;;;###autoload
-(defun radian/kill-buried-buffers (&optional buffer-list interactive)
-  "Kill buffers that are buried.
-
-If PROJECT-P (universal argument), only kill buried buffers belonging to the
-current project."
-  (interactive
-   (list (radian-buried-buffers
-          (if current-prefix-arg (radian-project-buffer-list)))
-         t))
-  (mapc #'kill-buffer buffer-list)
-  (radian--message-or-count
-   interactive "Killed %d buried buffers"
-   (- (length buffer-list)
-      (length (cl-remove-if-not #'buffer-live-p buffer-list)))))
 
 ;;;###autoload
 (defun radian/kill-project-buffers (project &optional interactive)
@@ -383,7 +294,7 @@ current project."
            nil)
          t))
   (when project
-    (let ((buffer-list (radian-project-buffer-list project)))
+    (let ((buffer-list (project-buffers (project-current nil project))))
       (radian-kill-buffers-fixup-windows buffer-list)
       (radian--message-or-count
        interactive "Killed %d project buffers"
