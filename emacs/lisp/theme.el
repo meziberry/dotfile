@@ -158,6 +158,13 @@
       (custom-theme-set-faces
        theme
 
+       ;; meow
+       `(meow-normal-indicator  ((,class (:foreground ,prompt :bold t))))
+       `(meow-beacon-indicator  ((,class (:foreground ,prompt :bold t))))
+       `(meow-keypad-indicator  ((,class (:foreground ,prompt :bold t))))
+       `(meow-insert-indicator  ((,class (:foreground ,prompt :bold t))))
+       `(meow-motion-indicator  ((,class (:foreground ,prompt :bold t))))
+
        ;; whitespace-line
        `(whitespace-line        ((,class :background "yellow" :foreground "purple")))
 

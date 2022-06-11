@@ -241,7 +241,9 @@ KEY-NAME, COMMAND, and PREDICATE are as in `-key'."
 (defvar radian-disabled-packages nil
   "List of packages that Radian should not load.")
 
-(defvar radian-enabled-features '(+bottom)
+(defvar radian-enabled-features
+  '(+bottom                             ;mode-line
+    )
   "List of radian feature switch enabled")
 
 (defun featurep! (package)
@@ -878,6 +880,11 @@ If PKG passed, require PKG before binding."
   :custom
   (meow-use-cursor-position-hack . t)
   (meow-use-enhanced-selection-effect . t)
+  (meow-replace-state-name-list . '((normal . "N")
+                                    (motion . "M")
+                                    (keypad . "K")
+                                    (insert . "I")
+                                    (beacon . "B")))
   (meow-selection-command-fallback . '((meow-save . meow-keypad-start)
                                        (meow-change . meow-keypad-start)
                                        (meow-cancel-selection . meow-keypad-start)
@@ -939,8 +946,7 @@ into `regexp-search-ring'"
 (w gcmh/k)
 
 ;;;; Hide-mode-line
-(w hide-mode-line
-  :hook ((completion-list-mode-hook Man-mode-hook). hide-mode-line-mode))
+(w hide-mode-line/d :hook ((completion-list-mode-hook Man-mode-hook). hide-mode-line-mode))
 
 ;;;; MODE-local-vars-hook
 
@@ -1550,7 +1556,7 @@ all hooks after it are ignored.")
 (with-eval-after-load 'eldoc (eldoc-add-command 'radian/escape))
 
 ;;;; all-the-icons
-(w all-the-icons/m
+(w all-the-icons/md
   :commands (all-the-icons-octicon
              all-the-icons-faicon
              all-the-icons-fileicon
@@ -2420,22 +2426,6 @@ newline."
 (w orderless
   :aftercall radian-first-input-hook
   :config
-  (after! company
-    (defvar +vertico-company-completion-styles '(orderless partial-completion basic)
-      "Completion styles for company to use.
-
-The completion/vertico module uses the orderless completion style by default,
-but this returns too broad a candidate set for company completion. This variable
-overrides `completion-styles' during company completion sessions.")
-
-    (defadvice! +vertico--company-capf--candidates-a (fn &rest args)
-      "Highlight company matches correctly, and try default completion styles before
-orderless."
-      :around #'company-capf--candidates
-      (let ((orderless-match-faces [completions-common-part])
-            (completion-styles +vertico-company-completion-styles))
-        (apply fn args))))
-
   (defun +vertico-orderless-dispatch (pattern _index _total)
     (cond
      ;; Ensure $ works with Consult commands, which add disambiguation suffixes
@@ -3009,87 +2999,16 @@ and cannot run in."
 ;; here is because it gets pulled in by LSP, and we need to unbreak
 ;; some stuff.
 (w yasnippet/d
-
   :bind (yas-minor-mode-map
          ;; Disable TAB from expanding snippets, as I don't use it and
          ;; it's annoying.
          ("TAB" . nil)
          ("<tab>" . nil))
-  :after company
   :config
-
   ;; Reduce verbosity. The default value is 3. Bumping it down to 2
   ;; eliminates a message about successful snippet lazy-loading setup
   ;; on every(!) Emacs init. Errors should still be shown.
   (setq yas-verbosity 2)
-
-  ;; Make it so that Company's keymap overrides Yasnippet's keymap
-  ;; when a snippet is active. This way, you can TAB to complete a
-  ;; suggestion for the current field in a snippet, and then TAB to
-  ;; move to the next field. Plus, C-g will dismiss the Company
-  ;; completions menu rather than cancelling the snippet and moving
-  ;; the cursor while leaving the completions menu on-screen in the
-  ;; same location.
-  (z company
-
-    :config
-
-    ;; This function translates the "event types" I get from
-    ;; `map-keymap' into things that I can pass to `lookup-key' and
-    ;; `define-key'. It's a hack, and I'd like to find a built-in
-    ;; function that accomplishes the same thing while taking care of
-    ;; any edge cases I might have missed in this ad-hoc solution.
-    (defun radian--yasnippet-normalize-event (event)
-      "This function is a complete hack, do not use.
-But in principle, it translates what we get from `map-keymap'
-into what `lookup-key' and `define-key' want."
-      (if (vectorp event)
-          event
-        (vector event)))
-
-    ;; Here we define a hybrid keymap that delegates first to
-    ;; `company-active-map' and then to `yas-keymap'.
-    (defvar radian--yasnippet-then-company-keymap
-      ;; It starts out as a copy of `yas-keymap', and then we
-      ;; merge in all of the bindings from `company-active-map'.
-      (let ((keymap (copy-keymap yas-keymap)))
-        (map-keymap
-         (lambda (event company-cmd)
-           (let* ((event (radian--yasnippet-normalize-event event))
-                  (yas-cmd (lookup-key yas-keymap event)))
-             ;; Here we use an extended menu item with the
-             ;; `:filter' option, which allows us to dynamically
-             ;; decide which command we want to run when a key is
-             ;; pressed.
-             (define-key keymap event
-                         `(menu-item
-                           nil ,company-cmd :filter
-                           (lambda (cmd)
-                             ;; There doesn't seem to be any obvious
-                             ;; function from Company to tell whether or not
-                             ;; a completion is in progress (à la
-                             ;; `company-explicit-action-p'), so I just
-                             ;; check whether or not `company-my-keymap' is
-                             ;; defined, which seems to be good enough.
-                             (if company-my-keymap
-                                 ',company-cmd
-                               ',yas-cmd))))))
-         company-active-map)
-        keymap)
-      "Keymap which delegates to both `company-active-map' and `yas-keymap'.
-The bindings in `company-active-map' only apply if Company is
-currently active.")
-
-    (defadvice! radian--advice-company-overrides-yasnippet
-      (yas--make-control-overlay &rest args)
-      "Allow `company' keybindings to override those of `yasnippet'."
-      :around #'yas--make-control-overlay
-      ;; The function `yas--make-control-overlay' uses the current
-      ;; value of `yas-keymap' to build the Yasnippet overlay, so to
-      ;; override the Yasnippet keymap we only need to dynamically
-      ;; rebind `yas-keymap' for the duration of that function.
-      (let ((yas-keymap radian--yasnippet-then-company-keymap))
-        (apply yas--make-control-overlay args))))
 
   :blackout yas-minor-mode)
 
@@ -3163,208 +3082,54 @@ currently active.")
         (hl-todo-mode +1)))))
 
 ;;;; Language servers
-
-;; Package `lsp-mode' is an Emacs client for the Language Server
-;; Protocol <https://langserver.org/>. It is where we get all of our
-;; information for completions, definition location, documentation,
-;; and so on.
-(w lsp-mode
+;; `lsp-bridge' has itself completion-frontend `acm'.
+(sup '(lsp-bridge
+       :files ("acm" "core" "langserver" "*.el" "*.py")
+       :host github :repo "manateelazycat/lsp-bridge" :branch "master"))
+(b lsp-bridge
+  "The fastest LSP on emacs"
+  :url "manateelazycat/lsp-bridge"
   :preface
-
-  (w consult-lsp :if (featurep! 'consult) :commands consult-lsp-symbols)
-
-  (defcustom radian-lsp-disable nil
-    "If non-nil, then LSP is not allowed to be enabled.
-For use in file-local variables."
-    :type 'boolean
-    :safe #'booleanp)
-
-  (defun radian--lsp-enable (&optional _)
-    "Enable `lsp-mode' for most programming modes.
-Do this on `after-change-major-mode-hook' instead of
-`prog-mode-hook' and `text-mode-hook' because we want to make
-sure regular mode hooks get a chance to run first, for example to
-set LSP configuration (see `lsp-python-ms')."
-    (when (derived-mode-p #'prog-mode #'text-mode)
-      (unless (or radian-lsp-disable
-                  (null buffer-file-name)
-                  (derived-mode-p
-                   ;; `lsp-mode' doesn't support Elisp, so let's avoid
-                   ;; triggering the autoload just for checking that, yes,
-                   ;; there's nothing to do for the *scratch* buffer.
-                   #'emacs-lisp-mode
-                   ;; Disable for modes that we currently use a specialized
-                   ;; framework for, until they are phased out in favor of
-                   ;; LSP.
-                   #'clojure-mode
-                   #'ruby-mode))
-        (lsp))))
-  ;; (setq xref-backend-functions (remq 'lsp--xref-backend xref-backend-functions))
-
-  :bind (lsp-mode-map ([remap xref-find-apropos] . consult-lsp-symbols))
-  :hook (after-change-major-mode-hook . radian--lsp-enable)
-
-  :init
-  (defvar +lsp-defer-shutdown 3
-    "If non-nil, defer shutdown of LSP servers for this many seconds after last
-workspace buffer is closed.
-
-This delay prevents premature server shutdown when a user still intends on
-working on that project after closing the last buffer, or when programmatically
-killing and opening many LSP/eglot-powered buffers.")
-
-  (defvar +lsp--default-read-process-output-max nil)
-  (defvar +lsp--default-gcmh-high-cons-threshold nil)
-  (defvar +lsp--optimization-init-p nil)
-  (define-minor-mode +lsp-optimization-mode
-    "Deploys universal GC and IPC optimizations for `lsp-mode' and `eglot'."
-    :global t
-    :init-value nil
-    (if (not +lsp-optimization-mode)
-        (setq-default read-process-output-max +lsp--default-read-process-output-max
-                      gcmh-high-cons-threshold +lsp--default-gcmh-high-cons-threshold
-                      +lsp--optimization-init-p nil)
-      ;; Only apply these settings once!
-      (unless +lsp--optimization-init-p
-        (setq +lsp--default-read-process-output-max
-              (default-value 'read-process-output-max)
-              +lsp--default-gcmh-high-cons-threshold
-              (default-value 'gcmh-high-cons-threshold))
-        ;; `read-process-output-max' is only available on recent development
-        ;; builds of Emacs 27 and above.
-        (setq-default read-process-output-max (* 1024 1024))
-        ;; REVIEW LSP causes a lot of allocations, with or without Emacs 27+'s
-        ;;        native JSON library, so we up the GC threshold to stave off
-        ;;        GC-induced slowdowns/freezes. Radian uses `gcmh' to enforce its
-        ;;        GC strategy, so we modify its variables rather than
-        ;;        `gc-cons-threshold' directly.
-        (setq-default gcmh-high-cons-threshold (* 2 +lsp--default-gcmh-high-cons-threshold))
-        (gcmh-set-high-threshold)
-        (setq +lsp--optimization-init-p t))))
-
-  ;; Don't auto-kill LSP server after last workspace buffer is killed, because I
-  ;; will do it for you, after `+lsp-defer-shutdown' seconds.
-  (setq lsp-keep-workspace-alive nil)
-  (setq lsp-modeline-code-actions-enable nil
-        ;; Make breadcrumbs opt-in; they're redundant with the modeline and imenu
-        lsp-headerline-breadcrumb-enable nil
-        ;; Disable LSP reformatting your code as you type. We use Apheleia
-        ;; for that instead.
-        lsp-enable-on-type-formatting nil
-        ;; Disable features that have great potential to be slow.
-        lsp-enable-folding nil
-        lsp-enable-text-document-color nil)
+  ;; `posframe' is dependency of `lisp-bridge'
+  (w posframe)
+  :when (display-graphic-p)
+  :hook (radian-first-buffer-hook . global-lsp-bridge-mode)
+  :bind
+  ("M-." . lsp-bridge-jump)
+  ("M-," . lsp-bridge-jump-back)
+  (radian-comma-keymap ("te" . lsp-bridge-toggle-english-helper))
 
   :config
-  ;; We want to make sure the PATH is set up correctly by now, since
-  ;; otherwise we might not be able to find the LSP server binaries.
-  (radian-env-setup)
+  ;; Mix `lsp-bridge' `xref' and `dumb-jump'.
+  (defun lsp-bridge-jump ()
+    (interactive)
+    (cond
+     ((eq major-mode 'emacs-lisp-mode)
+      (embark-dwim))
+     (lsp-bridge-mode
+      (lsp-bridge-find-def))
+     (t
+      (embark-dwim))))
 
-  (set-popup-rule! "^\\*lsp-\\(help\\|install\\)" :size 0.35 :quit t :select t)
-
-  (defun radian--advice-lsp-mode-silence (format &rest args)
-    "Silence needless diagnostic messages from `lsp-mode'.
-
-This is a `:before-until' advice for several `lsp-mode' logging
-functions."
-    (or
-     (string-match-p "No LSP server for %s" format)
-     (string-match-p "Connected to %s" format)
-     (string-match-p "Unable to calculate the languageId" format)
-     (string-match-p
-      "There are no language servers supporting current mode" format)
-     ;; Errors we get from gopls for no good reason (I can't figure
-     ;; out why). They don't impair functionality.
-     (and (stringp (car args))
-          (or (string-match-p "^no object for ident .+$" (car args))
-              (string-match-p "^no identifier found$" (car args))))))
-
-  (dolist (fun '(lsp-warn lsp--warn lsp--info lsp--error))
-    (advice-add fun :before-until #'radian--advice-lsp-mode-silence))
-
-  ;; If we don't disable this, we get a warning about YASnippet not
-  ;; being available, even though it is. I don't use YASnippet anyway,
-  ;; so don't bother with it.
-  (setq lsp-enable-snippet nil)
-
-  (defadvice! radian--lsp-run-from-node-modules (command)
-    "Find LSP executables inside node_modules/.bin if present."
-    :filter-return #'lsp-resolve-final-function
-    (cl-block nil
-      (prog1 command
-        (when-let ((project-dir
-                    (locate-dominating-file default-directory "node_modules"))
-                   (binary
-                    (radian--path-join
-                     project-dir "node_modules" ".bin" (car command))))
-          (when (file-executable-p binary)
-            (cl-return (cons binary (cdr command))))))))
-
-  (add-hook! 'lsp-mode-hook
-    (defun +lsp-display-guessed-project-root-h ()
-      "Log what LSP things is the root of the current project."
-      ;; Makes it easier to detect root resolution issues.
-      (when-let (path (buffer-file-name (buffer-base-buffer)))
-        (if-let (root (lsp--calculate-root (lsp-session) path))
-            (lsp--info "Guessed project root is %s" (abbreviate-file-name root))
-          (lsp--info "Could not guess project root."))))
-    #'+lsp-optimization-mode)
-
-  (defvar +lsp--deferred-shutdown-timer nil)
-  (defadvice! +lsp-defer-server-shutdown-a (fn &optional restart)
-    "Defer server shutdown for a few seconds.
-This gives the user a chance to open other project files before the server is
-auto-killed (which is a potentially expensive process). It also prevents the
-server getting expensively restarted when reverting buffers."
-    :around #'lsp--shutdown-workspace
-    (if (or lsp-keep-workspace-alive
-            restart
-            (null +lsp-defer-shutdown)
-            (= +lsp-defer-shutdown 0))
-        (prog1 (funcall fn restart)
-          (+lsp-optimization-mode -1))
-      (when (timerp +lsp--deferred-shutdown-timer)
-        (cancel-timer +lsp--deferred-shutdown-timer))
-      (setq +lsp--deferred-shutdown-timer
-            (run-at-time
-             (if (numberp +lsp-defer-shutdown) +lsp-defer-shutdown 3)
-             nil (lambda (workspace)
-                   (with-lsp-workspace workspace
-                                       (unless (lsp--workspace-buffers workspace)
-                                         (let ((lsp-restart 'ignore))
-                                           (funcall fn))
-                                         (+lsp-optimization-mode -1))))
-             lsp--cur-workspace))))
-
-  (add-hook! 'kill-emacs-hook
-    (defun radian--lsp-teardown ()
-      "Ignore the LSP server getting killed.
-If we don't do this, then when killing Emacs we may be prompted
-with whether we want to restart the LSP server that has just been
-killed (which happens during Emacs shutdown)."
-      (setq lsp-restart nil)))
-
-  ;; Looks like `lsp-mode' doesn't know about LaTeX yet.
-  (add-to-list 'lsp-language-id-configuration '(latex-mode . "latex"))
-
-  ;; Also, it has a bunch of regexps which are completely wrong.
-  (setq lsp-language-id-configuration
-        (mapcar
-         (lambda (link)
-           (if (and (stringp (car link))
-                    (string-match "\\`\\.\\*\\.\\(.+\\)\\'" (car link)))
-               (cons
-                (format "\\.%s\\'" (match-string 1 (car link))) (cdr link))
-             link))
-         lsp-language-id-configuration))
-
-  :blackout " LSP")
+  (defun lsp-bridge-jump-back ()
+    (interactive)
+    (cond
+     ((eq major-mode 'emacs-lisp-mode)
+      (xref-go-back))
+     (lsp-bridge-mode
+      (lsp-bridge-return-from-def))
+     (t
+      (xref-go-back)))))
 
 ;;;; Autocompletion
+(b acm
+  :custom
+  (acm-enable-dabbrev . t)
+  (acm-enable-yas . nil)
+  (acm-candidate-match-function . 'orderless-flex))
 
 (w corfu
   :url "minad/corfu"
-  :hook (radian-first-buffer-hook . global-corfu-mode)
   :custom
   (corfu-cycle . t)                ;; Enable cycling for `corfu-next/previous'
   (corfu-auto . t)                 ;; Enable auto completion
@@ -3408,6 +3173,9 @@ If all failed, try to complete the common part with `corfu-complete'"
   :bind (corfu-map
          ([tab] . smarter-tab-to-complete)
          ("TAB" . smarter-tab-to-complete))
+  :init
+  (unless (display-graphic-p)
+      (add-hook 'radian-first-buffer-hook #'global-corfu-mode))
   :config
   (after! meow (add-hook 'meow-insert-exit-hook #'corfu-quit))
   (defun corfu-enable-in-minibuffer ()
@@ -3446,175 +3214,13 @@ If all failed, try to complete the common part with `corfu-complete'"
   (add-to-list 'completion-at-point-functions #'cape-symbol))
 
 ;;;; TabNine
-(z tabnine-capf/i
+(z tabnine-capf/e
   :after cape
   :straight
   (tabnine-capf :host github :repo "50ways2sayhard/tabnine-capf" :files ("*.el" "*.sh"))
   :config
   (add-hook 'kill-emacs-hook  #'tabnine-capf-kill-process)
   (add-to-list 'completion-at-point-functions #'tabnine-completion-at-point))
-
-;; Package `company' provides an in-buffer autocompletion framework.
-;; It allows for packages to define backends that supply completion
-;; candidates, as well as optional documentation and source code. Then
-;; Company allows for multiple frontends to display the candidates,
-;; such as a tooltip menu. Company stands for "Complete Anything".
-(z company/kd
-  :straight
-  (company :flavor melpa :host github
-           :repo "company-mode/company-mode" :files (:defaults "icons"))
-  :hook (after-init-hook . global-company-mode)
-  :bind (;; Remap the standard Emacs keybindings for invoking
-         ;; completion to instead use Company. You might think this
-         ;; could be put in the `:bind*' declaration below, but it
-         ;; seems that `bind-key*' does not work with remappings.
-         ([remap completion-at-point] . company-manual-begin)
-         ([remap complete-symbol] . company-manual-begin)
-
-         ;; The following are keybindings that take effect whenever
-         ;; the completions menu is visible, even if the user has not
-         ;; explicitly interacted with Company.
-
-         (company-active-map
-
-          ;; Make TAB always complete the current selection, instead of
-          ;; only completing a common prefix.
-          ("<tab>" . company-complete-selection)
-          ("TAB" . company-complete-selection)
-
-          ;; When was the last time you used the C-s binding for
-          ;; searching candidates? It conflicts with buffer search,
-          ;; anyway. Same for the scroll commands.
-          ("C-s" . nil)
-          ([remap scroll-down-command] . nil)
-          ([remap scroll-up-command] . nil)
-
-          ;; The following are keybindings that only take effect if the
-          ;; user has explicitly interacted with Company. Note that
-          ;; `:map' from above is "sticky", and applies also below: see
-          ;; https://github.com/jwiegley/use-package/issues/334#issuecomment-349473819.
-          ;; Make RET don't trigger a completion
-          ("<return>" . nil)
-          ("RET" . nil)
-
-          ;; We then make <up> and <down> abort the completions menu
-          ;; unless the user has interacted explicitly. Note that we
-          ;; use `company-select-previous' instead of
-          ;; `company-select-previous-or-abort'. I think the former
-          ;; makes more sense since the general idea of this `company'
-          ;; configuration is to decide whether or not to steal
-          ;; keypresses based on whether the user has explicitly
-          ;; interacted with `company', not based on the number of
-          ;; candidates.
-          ;;
-          ;; Note that M-p and M-n work regardless of whether explicit
-          ;; interaction has happened yet, and note also that M-TAB
-          ;; when the completions menu is open counts as an
-          ;; interaction.
-          ("<up>" . company-select-previous)
-          ("<down>" . company-select-next)))
-
-  :bind* (;; The default keybinding for `completion-at-point' and
-          ;; `complete-symbol' is M-TAB or equivalently C-M-i. We
-          ;; already remapped those bindings to `company-manual-begin'
-          ;; above. Here we make sure that they definitely invoke
-          ;; `company-manual-begin' even if a minor mode binds M-TAB
-          ;; directly.
-          ("M-TAB" . company-manual-begin))
-
-  :config
-  ;; Make RET trigger a completion if and only if the user has
-  ;; explicitly interacted with Company, instead of always
-  ;; doing so.
-  (-keys
-   (company-active-map
-    ("<return>" . (cmds! (company-explicit-action-p)
-                         #'company-complete-selection #'newline-and-indent))
-    ("RET" . (cmds! (company-explicit-action-p)
-                    #'company-complete-selection #'newline-and-indent))))
-
-  (customize-set-variable
-   'company-quick-access-keys '("a" "o" "e" "u" "i" "d" "h" "t" "s" "."))
-
-  ;; Make completions display twice as soon.
-  (setq company-idle-delay 0.15)
-
-  ;; Make completions display when you have only typed one character,
-  ;; instead of three.
-  (setq company-minimum-prefix-length 2)
-
-  ;; Always display the entire suggestion list onscreen, placing it
-  ;; above the cursor if necessary.
-  (setq company-tooltip-minimum company-tooltip-limit)
-
-  ;; Always display suggestions in the tooltip, even if there is only
-  ;; one. Also, don't display metadata in the echo area. (This
-  ;; conflicts with ElDoc.)
-  (setq company-frontends '(company-pseudo-tooltip-frontend))
-
-  ;; Show quick-reference numbers in the tooltip. (Select a completion
-  ;; with M-1 through M-0.)
-  (setq company-show-quick-access t)
-
-  ;; Prevent non-matching input (which will dismiss the completions
-  ;; menu), but only if the user interacts explicitly with Company.
-  (setq company-require-match #'company-explicit-action-p)
-
-  ;; Only search the current buffer to get suggestions for
-  ;; `company-dabbrev' (a backend that creates suggestions from text
-  ;; found in your buffers). This prevents Company from causing lag
-  ;; once you have a lot of buffers open.
-  (setq company-dabbrev-other-buffers nil)
-
-  ;; Make the `company-dabbrev' backend fully case-sensitive, to
-  ;; improve the UX when working with domain-specific words that have
-  ;; particular casing.
-  (setq company-dabbrev-ignore-case nil)
-  (setq company-dabbrev-downcase nil)
-
-  ;; When candidates in the autocompletion tooltip have additional
-  ;; metadata, like a type signature, align that information to the
-  ;; right-hand side. This usually makes it look neater.
-  (setq company-tooltip-align-annotations t)
-
-  (defvar-local radian--company-buffer-modified-counter nil
-    "Last return value of `buffer-chars-modified-tick'.
-Used to ensure that Company only initiates a completion when the
-buffer is modified.")
-
-  (defadvice! radian--advice-company-complete-on-change ()
-    "Make Company trigger a completion when the buffer is modified.
-This is in contrast to the default behavior, which is to trigger
-a completion when one of a whitelisted set of commands is used.
-One specific improvement this brings about is that you get
-completions automatically when backspacing into a symbol."
-    :override #'company--should-begin
-    (let ((tick (buffer-chars-modified-tick)))
-      (unless (equal tick radian--company-buffer-modified-counter)
-        ;; Only trigger completion if previous counter value was
-        ;; non-nil (i.e., don't trigger completion just as we're
-        ;; jumping to a buffer for the first time).
-        (prog1 (and radian--company-buffer-modified-counter
-                    (not (and (symbolp this-command)
-                              (string-match-p
-                               "^\\(company-\\|undo-\\|undo$\\)"
-                               (symbol-name this-command)))))
-          (setq radian--company-buffer-modified-counter tick)))))
-
-  (defadvice! radian--advice-company-update-buffer-modified-counter ()
-    "Make sure `radian--company-buffer-modified-counter' is up to date.
-If we don't do this on `company--should-continue' as well as
-`company--should-begin', then we may end up in a situation where
-autocomplete triggers when it shouldn't. Specifically suppose we
-delete a char from a symbol, triggering autocompletion, then type
-it back, but there is more than one candidate so the menu stays
-onscreen. Without this advice, saving the buffer will cause the
-menu to disappear and then come back after `company-idle-delay'."
-    :after #'company--should-continue
-    (setq radian--company-buffer-modified-counter
-          (buffer-chars-modified-tick)))
-
-  (add-hook! '(shell-mode-hook) (company-mode -1)))
 
 ;;;; Definition location
 
@@ -3629,74 +3235,9 @@ menu to disappear and then come back after `company-idle-delay'."
     (defun dumb-jump-enable ()
       "enable `dumb-jump'"
       (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t)))
-  :bind* (("C-M-f" . xref-find-references)))
+  :bind* ("C-M-f" . xref-find-references))
 
 ;;;; Syntax checking and code linting
-
-;; Package `flycheck' provides a framework for in-buffer error and
-;; warning highlighting. We kind of don't use it because we use
-;; `lsp-ui' instead, but internally `lsp-ui' actually hacks Flycheck
-;; to behave differently, so it is a dependency. We just don't enable
-;; Flycheck anywhere else and rely on `lsp-ui' to handle things when
-;; appropriate. However, interestingly, Flycheck is not marked as a
-;; dependency of `lsp-ui', hence this declaration.
-(w flycheck/k)
-
-;; Package `lsp-ui' provides a pretty UI for showing diagnostic
-;; messages from LSP in the buffer using overlays. It's configured
-;; automatically by `lsp-mode'.
-(w lsp-ui
-  :bind (lsp-ui-mode-map ("C-c f" . lsp-ui-sideline-apply-code-actions)
-                         ([remap xref-find-definitions] . lsp-ui-peek-find-definitions)
-                         ([remap xref-find-references] . lsp-ui-peek-find-references) )
-  :config
-  ;; With `lsp-ui', there's no need for the ElDoc integration
-  ;; provided by `lsp-mode', and in fact for Bash it is very
-  ;; annoying since all the hover information is multiline.
-  (eval-after-load 'lsp-mode (setq lsp-eldoc-enable-hover nil))
-
-  (setq lsp-ui-peek-enable t
-        ;; Don't show symbol definitions in the sideline. They are pretty noisy,
-        ;; and there is a bug preventing Flycheck errors from being shown (the
-        ;; errors flash briefly and then disappear).
-        lsp-ui-sideline-show-hover nil
-        ;; Re-enable icon scaling (it's disabled by default upstream for Emacs
-        ;; 26.x compatibility; see emacs-lsp/lsp-ui#573)
-        lsp-ui-sideline-actions-icon lsp-ui-sideline-actions-icon-default)
-
-  (defadvice! radian--advice-lsp-ui-apply-single-fix
-    (orig-fun &rest args)
-    "Apply code fix immediately if only one is possible."
-    :around #'lsp-ui-sideline-apply-code-actions
-    (letf! ((defun completing-read (prompt collection &rest args)
-              (if (= (safe-length collection) 1)
-                  (car collection)
-                (apply completing-read prompt collection args))))
-      (apply orig-fun args)))
-
-  (z lsp-ui-imenu :bind (lsp-ui-imenu-mode-map ("n" . next-line) ("p" . previous-line)))
-
-  ;; Feature `lsp-ui-doc' from package `lsp-ui' displays documentation
-  ;; in a child frame when point is on a symbol.
-  (z lsp-ui-doc
-    :config
-    (setq lsp-ui-doc-max-height 10
-          lsp-ui-doc-max-width 40
-          lsp-ui-doc-show-with-mouse t
-          lsp-ui-doc-show-with-cursor nil)
-
-    ;; https://github.com/emacs-lsp/lsp-ui/issues/414
-    (add-to-list 'lsp-ui-doc-frame-parameters '(no-accept-focus . t))
-    (defadvice! radian--advice-lsp-ui-doc-allow-multiline (func &rest args)
-      "Prevent `lsp-ui-doc' from removing newlines from documentation."
-      :around #'lsp-ui-doc--render-buffer
-      (letf! ((defun replace-regexp-in-string
-                  (regexp rep string &rest args)
-                (if (equal regexp "`\\([\n]+\\)")
-                    string
-                  (apply replace-regexp-in-string
-                         regexp rep string args))))
-        (apply func args)))))
 
 ;;; MODULE {Language support}
 ;;;; Common Lisp
@@ -3717,7 +3258,9 @@ menu to disappear and then come back after `company-idle-delay'."
   (add-hook 'lisp-mode-hook #'rainbow-delimiters-mode)
   (defvar inferior-lisp-program "ros -Q run")
 
-  :hook (lisp-mode-local-vars-hook . sly-editing-mode)
+  :hook
+  (lisp-mode-local-vars-hook . sly-editing-mode)
+  (lisp-mode-local-vars-hook . corfu-mode)
   :init
   ;; I moved this hook to `lisp-mode-local-vars-hook', so it only affects
   ;; `lisp-mode', and not every other derived lisp mode (like `fennel-mode').
@@ -3830,12 +3373,11 @@ menu to disappear and then come back after `company-idle-delay'."
     ("tT" . sly-toggle-fancy-trace)
     ("tu" . sly-untrace-all))))
 
-(w sly-repl-ansi-color/m :defer-config (add-to-list 'sly-contribs 'sly-repl-ansi-color))
+(w sly-repl-ansi-color :defer-config (add-to-list 'sly-contribs 'sly-repl-ansi-color))
 (w sly-macrostep :commands macrostep-expand)
 
 ;;;; Dart
 (w dart-mode
-  :when (featurep! 'lsp-mode)
   :config
   (set-ligatures! '(dart-mode)
     ;; Functional
@@ -3857,13 +3399,13 @@ menu to disappear and then come back after `company-idle-delay'."
     ;; Other
     :yield "yield"))
 
-(w lsp-dart
-  :straight treemacs
-  :when (featurep! 'lsp-mode)
-  :config
-  (if *WINDOWS
-      (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
-            lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")))
+;; (w lsp-dart
+;;   :straight treemacs
+;;   :when (featurep! 'lsp-mode)
+;;   :config
+;;   (if *WINDOWS
+;;       (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
+;;             lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")))
 (w flutter :bind (dart-mode-map ("r" . flutter-run-or-hot-reload)))
 (w hover :when (featurep! 'flutter) :init (set-popup-rule! "\\*Hover\\*" :quit nil))
 
@@ -3974,36 +3516,7 @@ previously."
       "Set up \\[beginning-of-defun] and \\[end-of-defun] correctly.
 See <https://github.com/dominikh/go-mode.el/issues/232>."
       (setq-local beginning-of-defun-function #'radian--go-beginning-of-defun)
-      (setq-local end-of-defun-function #'radian--go-end-of-defun)))
-
-  (z lsp-ui
-
-    :config
-
-    (defadvice! radian--advice-lsp-ui-organize-imports-more-cleanly
-      (func actions &rest args)
-      "Clean up the \"Organize Imports\" code actions for Go.
-Firstly, don't display \"Organize Imports\" or \"Organize All
-Imports\" in the sideline, as gopls sometimes reports these code
-actions when the indentation is wrong (rather than when imports
-need to be changed). Secondly, filter out \"Organize All
-Imports\" internally, so that applying a code action will default
-to \"Organize Imports\" instead of prompting you to decide
-between that and \"Organize All Imports\" (which does the same
-thing as far as I can tell)."
-      :around #'lsp-ui-sideline--code-actions
-      (let ((actions-to-keep nil)
-            (actions-to-render nil))
-        (dolist (action actions)
-          (unless (equal "Organize All Imports" (gethash "title" action))
-            (push action actions-to-keep)
-            (unless (equal "Organize Imports" (gethash "title" action))
-              (push action actions-to-render))))
-        (setq actions-to-keep (nreverse actions-to-keep))
-        (setq actions-to-render (nreverse actions-to-render))
-        (when actions-to-render
-          (apply func actions-to-render args))
-        (setq lsp-ui-sideline--code-actions actions-to-keep)))))
+      (setq-local end-of-defun-function #'radian--go-end-of-defun))))
 
 ;;;; Haskell
 ;; https://www.haskell.org/
@@ -4045,21 +3558,7 @@ This works around an upstream bug; see
     ;; LSP that we actually want to use.
     (define-key interactive-haskell-mode-map "\M-." nil)
 
-    :blackout interactive-haskell-mode)
-
-  ;; Feature `haskell-customize' from package `haskell-mode' defines the
-  ;; user options for the package.
-  (z haskell-customize
-    :config
-
-    ;; Disable in-buffer underlining of errors and warnings, since we
-    ;; already have them from `lsp-ui'.
-    (setq haskell-process-show-overlays nil))
-
-  ;; Package `lsp-haskell' configures the HIE Haskell language server
-  ;; for use with `lsp-mode'.
-  (w lsp-haskell
-    :after (:all lsp-mode haskell-mode)))
+    :blackout interactive-haskell-mode))
 
 ;;;; Lua
 ;; <http://www.lua.org/>
@@ -4185,11 +3684,7 @@ See https://emacs.stackexchange.com/a/3338/12534."
                     (looking-at "#!\\([^ \n]+/python[^ \n]+\\)"))
             (setq-local
              python-shell-interpreter
-             (substring-no-properties (match-string 1))))))
-      (with-no-warnings
-        (setq-local
-         lsp-python-ms-python-executable-cmd
-         python-shell-interpreter))))
+             (substring-no-properties (match-string 1))))))))
 
   ;; I honestly don't understand why people like their packages to
   ;; spew so many messages.
@@ -4488,93 +3983,6 @@ This function calls `json-mode--update-auto-mode' to change the
   (set-popup-rule! "^\\*nixos-options-doc\\*$" :ttl 0 :quit t))
 
 ;;; Introspection
-;;;; Help
-;; Package `helpful' provides a complete replacement for the built-in
-;; Emacs help facility which provides much more contextual information
-;; in a better format.
-(w helpful/d
-
-  :commands helpful--read-symbol
-  :bind (;; Remap standard commands.
-         ([remap describe-command]  . helpful-command)
-         ([remap describe-symbol]   . helpful-symbol)
-         ([remap describe-key]      . helpful-key)
-
-         ;; Suggested bindings from the documentation at
-         ;; https://github.com/Wilfred/helpful.
-         ("C-c C-d" . helpful-at-point)
-
-         (help-map
-          ("F"   . helpful-function)
-          ("M-f" . helpful-macro)
-          ("C"   . helpful-command)))
-
-  :init
-  (defun radian-use-helpful-a (fn &rest args)
-    "Force FN to use helpful instead of the old describe-* commands."
-    (letf! ((#'describe-function #'helpful-function)
-            (#'describe-variable #'helpful-variable))
-      (apply fn args)))
-
-  ;; Note that this function is actually defined in `elisp-mode'
-  ;; because screw modularity.
-  (defadvice! radian--advice-company-elisp-use-helpful
-    (func &rest args)
-    "Cause `company' to use Helpful to show Elisp documentation."
-    :around #'elisp--company-doc-buffer
-    (cl-letf (((symbol-function #'describe-function) #'helpful-function)
-              ((symbol-function #'describe-variable) #'helpful-variable)
-              ((symbol-function #'help-buffer) #'current-buffer))
-      (apply func args)))
-
-  (after! apropos
-    ;; patch apropos buttons to call helpful instead of help
-    (dolist (fun-bt '(apropos-function apropos-macro apropos-command))
-      (button-type-put
-       fun-bt 'action
-       (lambda (button)
-         (helpful-callable (button-get button 'apropos-symbol)))))
-    (dolist (var-bt '(apropos-variable apropos-user-option))
-      (button-type-put
-       var-bt 'action
-       (lambda (button)
-         (helpful-variable (button-get button 'apropos-symbol))))))
-
-  :config
-
-  ;; Make it so you can quit out of `helpful-key' with C-g, like for
-  ;; every other command. Put this in a minor mode so it can be
-  ;; disabled.
-  (define-minor-mode radian-universal-keyboard-quit-mode
-    "Minor mode for making C-g work in `helpful-key'."
-    :global t
-    (if radian-universal-keyboard-quit-mode
-        (defadvice! radian--advice-helpful-key-allow-keyboard-quit
-          (&rest _)
-          "Make C-g work in `helpful-key'."
-          :before #'helpful-key
-          ;; The docstring of `add-function' says that if we make our
-          ;; advice interactive and the interactive spec is *not* a
-          ;; function, then it overrides the original function's
-          ;; interactive spec.
-          (interactive
-           (list
-            (let ((ret (read-key-sequence "Press key: ")))
-              (when (equal ret "\^G")
-                (signal 'quit nil))
-              ret))))
-      (advice-remove
-       #'helpful-key #'radian--advice-helpful-key-allow-keyboard-quit)))
-
-  (radian-universal-keyboard-quit-mode +1)
-
-  (defadvice! radian--advice-helpful-clone-emacs-source (library-name)
-    "Prompt user to clone Emacs source code when looking up functions.
-Otherwise, it only happens when looking up variables, for some
-bizarre reason."
-    :before #'helpful--library-path
-    (when (member (file-name-extension library-name) '("c" "rs"))
-      (radian-clone-emacs-source-maybe))))
 
 ;;;; Custom
 
@@ -5579,6 +4987,24 @@ Instead, display simply a flat colored region in the fringe."
                        beg end 'radian--git-gutter-blank args)))
         (apply func args)))))
 
+;;;; Input method
+(w rime/i
+  :init
+  (when *WINDOWS (setenv "MSYSTEM_PREFIX" "C:/msys/mingw64"))
+  :custom
+  (default-input-method . "rime")
+  (rime-show-candidate . 'posframe)
+  (rime-disable-predicates . '(meow-normal-mode-p
+                               meow-keypad-mode-p
+                               meow-motion-mode-p
+                               meow-beacon-mode-p))
+  (rime-posframe-properties . '(:font "Zpix" :internal-border-width 1))
+  ;; (rime-inline-ascii-trigger . 'shift-r)
+  ;;Auto switch to inline ascii state when after a space after a non-ascii character.
+  (rime-inline-predicates . '(rime-predicate-space-after-cc-p))
+  :config
+  (define-key rime-active-mode-map (kbd "TAB") 'rime-inline-ascii))
+
 ;;;; Internet applications
 ;; Feature `browse-url' provides commands for opening URLs in
 ;; browsers.
@@ -5808,6 +5234,27 @@ No tab will created if the command is cancelled."
       "Clear all rainbow overlays."
       (remove-overlays (point-min) (point-max) 'ovrainbow t))
     (advice-add #'rainbow-turn-off :after #'my-rainbow-clear-overlays)))
+
+;;;; tree-sitter
+(w tree-sitter
+  :leaf-autoload nil
+  :init `(setenv "TREE_SITTER_DIR" ,(concat *cache/* "tree-sitter"))
+  :hook
+  (tree-sitter-after-on-hook . tree-sitter-hl-mode)
+  (radian-first-buffer-hook . global-tree-sitter-mode))
+
+(w tree-sitter-langs/e
+  :after tree-sitter
+  :config
+  ;; Add Emacs-Lisp for tree-sitter:
+  ;;
+  ;; 1. git clone https://github.com/Wilfred/tree-sitter-elisp
+  ;; 2. gcc ./src/parser.c -fPIC -I./src/ --shared -o elisp.so[dll]
+  ;; 3. cp ./elisp.so ~/.tree-sitter-langs/bin
+  ;; (~/.tree-sitter-langs/bin is path of your tree-sitter-langs repo)
+  (tree-sitter-load 'elisp)
+  (add-to-list 'tree-sitter-major-mode-language-alist '(emacs-lisp-mode . elisp))
+  (add-to-list 'tree-sitter-major-mode-language-alist '(lisp-interaction-mode . elisp)))
 
 ;;; TAIL-CORE 
 )
@@ -6317,7 +5764,7 @@ turn it off again after creating the first frame."
       ;; never automatically recentered.
       scroll-conservatively 101
       scroll-margin 0
-      scroll-preserve-screen-position t
+      scroll-preserve-screen-position 'always
       ;; Reduce cursor lag by a tiny bit by not auto-adjusting `window-vscroll'
       ;; for tall lines.
       auto-window-vscroll nil
@@ -6378,12 +5825,7 @@ turn it off again after creating the first frame."
 (req! font)
 
 ;;;; mode-line
-(b radian-modeline/e
-  :custom
-  (+modeline-height . 20)
-  (+modeline-enable-icon . t)
-  :config
-  (+modeline-global-mode +1))
+(b awesome-tray :hook (radian-load-theme-hook . awesome-tray-mode))
 
 ;;;; Formfeed display.
 (defun xah-insert-formfeed ()
@@ -6407,7 +5849,7 @@ turn it off again after creating the first frame."
 
 (dolist (hook '(window-configuration-change-hook
                 window-size-change-functions
-                after-setting-font-hook
+                after-setting-font-hookn
                 display-line-numbers-mode-hook))
   (add-hook hook #'xah-show-formfeed-as-line))
 

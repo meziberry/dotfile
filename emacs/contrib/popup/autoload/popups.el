@@ -289,7 +289,6 @@ Any non-nil value besides the above will be used as the raw value for
                         (funcall modeline)
                       modeline)))
                (hide-mode-line-mode +1)))))))
-(put '+popup-set-modeline-on-enable-h 'permanent-local-hook t)
 
 ;;;###autoload
 (defun +popup-unset-modeline-on-disable-h ()

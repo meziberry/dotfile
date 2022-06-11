@@ -174,6 +174,7 @@ prevent the popup(s) from messing up the UI (or vice versa)."
            #'+popup-set-modeline-on-enable-h
            #'+popup-unset-modeline-on-disable-h)
 
+(unless (featurep 'hide-mode-line) (defun hide-mode-line-mode (_)))
 
 ;;
 ;;; Hacks
