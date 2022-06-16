@@ -70,10 +70,8 @@ same arguments as `message'."
   `(when radian-debug-p
      (let ((inhibit-message (active-minibuffer-window)))
        (message
-        ,(concat (propertize "RADIAN " 'face 'font-lock-comment-face)
-                 (propertize (format "[%s] " radian--current-feature)
-                             'face 'warning)
-                 format-string)
+        (concat (propertize (format "[%s] " radian--block-name) 'face 'warning)
+                ,format-string)
         ,@args))))
 
 (defun radian-rpartial (fn &rest args)
@@ -963,11 +961,8 @@ In either case, eagerly load FEATURE during byte-compilation."
                                  (?m . (:disabled 'mini)) (?d . (:disabled t))
                                  (?b . (:disabled 'block)))
                                when (cl-find c flags) append p))
-               (inactive (if (cl-find ?- flags) t)))
-    (if inactive
-        `(leaf ,name :disabled 'block ;; :init (plist-get options :init)
-           :straight
-           ,(or (plist-get options :straight) (plist-get fopts :straight)))
+               (ignore (if (cl-find ?- flags) t)))
+    (unless ignore
       `(leaf ,name :preface
          ,(if doc-strings `(defhelper ,name ,@doc-strings))
          ,(if refs `(defref ,name ,refs))

@@ -37,9 +37,6 @@
    ;; packages from being reported asynchronously into the UI.
    (customize-set-variable 'native-comp-async-report-warnings-errors nil)))
 
-;;; Radian Variables/Hooks
-(defvar radian--current-feature 'core "The feature loading")
-
 (defconst *EMACS29+   (> emacs-major-version 28))
 (defconst *EMACS28+   (> emacs-major-version 27))
 (defconst *MAC        (eq system-type 'darwin))
@@ -510,19 +507,6 @@ hook directly into the init-file during byte-compilation."
       kept-new-versions 5
       tramp-backup-directory-alist backup-directory-alist)
 
-;; But turn on auto-save, so we have a fallback in case of crashes or lost data.
-;; Use `recover-file' or `recover-session' to recover them.
-(setq auto-save-default t
-      ;; Don't auto-disable auto-save after deleting big chunks. This defeats
-      ;; the purpose of a failsafe. This adds the risk of losing the data we
-      ;; just deleted, but I believe that's VCS's jurisdiction, not ours.
-      auto-save-include-big-deletions t
-      auto-save-file-name-transforms
-      (list (list "\\`/[^/]*:\\([^/]*/\\)*\\([^/]*\\)\\'"
-                  ;; Prefix tramp autosaves to prevent conflicts with local ones
-                  (concat auto-save-list-file-prefix "tramp-\\2") t)
-            (list ".*" auto-save-list-file-prefix t)))
-
 ;;;; EasyPG/EPG(GNU Privacy Guard(GnuPG))
 (after! epa
   ;; With GPG 2.1+, this forces gpg-agent to use the Emacs minibuffer to prompt
@@ -740,6 +724,24 @@ binding the variable dynamically over the entire init-file."
 (sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz"))
 (sup 'blackout)
 
+(sup 'no-littering)
+(setq no-littering-etc-directory *etc/*
+      no-littering-var-directory *cache/*)
+(require 'no-littering)
+
+;; But turn on auto-save, so we have a fallback in case of crashes or lost data.
+;; Use `recover-file' or `recover-session' to recover them.
+(setq auto-save-default t
+      ;; Don't auto-disable auto-save after deleting big chunks. This defeats
+      ;; the purpose of a failsafe. This adds the risk of losing the data we
+      ;; just deleted, but I believe that's VCS's jurisdiction, not ours.
+      auto-save-include-big-deletions t
+      auto-save-file-name-transforms
+      (list (list "\\`/[^/]*:\\([^/]*/\\)*\\([^/]*\\)\\'"
+                  ;; Prefix tramp autosaves to prevent conflicts with local ones
+                  (concat auto-save-list-file-prefix "tramp-\\2") t)
+            (list ".*" auto-save-list-file-prefix t)))
+
 (z leaf-keywords/e
   :bind (radian-comma-keymap ("lf" . leaf-find))
   :config
@@ -798,48 +800,32 @@ binding the variable dynamically over the entire init-file."
              ;; use leaf as a code block, is meaning don't require the
              ;; block name when compiling, just the block of code.
              ((eq v 'block)
-              (setq result `((setq radian--current-feature ',leaf--name) ,@leaf--body))
+              (setq result `((setq radian--block-name ',leaf--name) ,@leaf--body))
               (if mini (list (append '(unless mini-p) result)) result))
              ;; push disabled package into `radian-disabled-packages'
              ((eval v)
-              `((cl-pushnew ',leaf--name radian-disabled-packages)))
+              `((cl-pushnew ',leaf--name radian-disabled-packages)
+                ;; Register the recipes, when disabled.
+                ,@(mapcar
+                   (lambda (p) `(straight-register-package ',p))
+                   (let ((recipes (plist-get leaf--rest :straight)))
+                     ;; If have the recipe from :straight.
+                     (unless (eq (car-safe recipes) nil)
+                       (mapcar
+                        (lambda (e) (if (eq t e) leaf--name e))
+                        (if (alist-get leaf--name recipes)
+                            (delq t recipes)
+                          recipes)))))))
              (t
               (setq result `(memq ',leaf--name radian-disabled-packages))
               `((unless ,(if mini (append '(or mini-p) (list result)) result)
                   (try-feature ,leaf--name
-                    (setq radian--current-feature ',leaf--name)
+                    (setq radian--block-name ',leaf--name)
                     ,@leaf--body))))))))
   (setq leaf-defaults (plist-put leaf-defaults :disabled nil))
 
-  ;; when disable feature, register it's recipe.
-  ;; (setq leaf-keywords
-  ;;       (plist-put
-  ;;        leaf-keywords
-  ;;        :disabled
-  ;;        '(if (eval (car leaf--value))
-  ;;             `(,@(mapcar
-  ;;                  (lambda (elm) `(straight-register-package ',elm))
-  ;;                  (let ((recipes (plist-get leaf--rest :straight)))
-  ;;                    ;; If have the recipe from :straight.
-  ;;                    (unless (eq (car-safe recipes) nil)
-  ;;                      (mapcar
-  ;;                       (lambda (elm) (if (eq t elm) leaf--name elm))
-  ;;                       (if (alist-get leaf--name recipes)
-  ;;                           (delq t recipes)
-  ;;                         recipes))))))
-  ;;           `(,@leaf--body))))
-
   ;; Start `leaf-keywords'
   (leaf-keywords-init))
-
-;;;; No-littering
-;; Package `no-littering' changes the default paths for lots of
-;; different packages, with the net result that the ~/.emacs.d folder
-;; is much more clean and organized.
-(w no-littering/e
-  :pre-setq
-  (no-littering-etc-directory . *etc/*)
-  (no-littering-var-directory . *cache/*))
 
 ;; el-patch
 (w el-patch :custom (el-patch-enable-use-package-integration . nil))
@@ -885,13 +871,14 @@ If PKG passed, require PKG before binding."
                                     (keypad . "K")
                                     (insert . "I")
                                     (beacon . "B")))
-  (meow-selection-command-fallback . '((meow-save . meow-keypad-start)
-                                       (meow-change . meow-keypad-start)
-                                       (meow-cancel-selection . meow-keypad-start)
-                                       (meow-reverse . meow-open-below)
-                                       (meow-replace . meow-replace-char)
-                                       (meow-pop-selection . meow-pop-to-mark)
-                                       (meow-kill . meow-C-k)))
+  (meow-selection-command-fallback
+   . '((meow-save . meow-keypad-start)
+       (meow-change . meow-keypad-start)
+       (meow-cancel-selection . meow-keypad-start)
+       (meow-reverse . meow-open-below)
+       (meow-replace . meow-replace-char)
+       (meow-pop-selection . meow-pop-to-mark)
+       (meow-kill . meow-C-k)))
 
   :hook (after-init-hook . meow-global-mode)
   :config/el-patch
@@ -945,9 +932,6 @@ into `regexp-search-ring'"
 ;;;; gcmh-mode
 (w gcmh/k)
 
-;;;; Hide-mode-line
-(w hide-mode-line/d :hook ((completion-list-mode-hook Man-mode-hook). hide-mode-line-mode))
-
 ;;;; MODE-local-vars-hook
 
 ;; File+dir local variables are initialized after the major mode and its hooks
@@ -959,7 +943,8 @@ into `regexp-search-ring'"
   "Run MODE-local-vars-hook after local variables are initialized."
   (unless radian-inhibit-major-mode-post-hooks
     (setq-local radian-inhibit-major-mode-post-hooks t)
-    (radian-run-hooks (intern-soft (format "%s-local-vars-hook" major-mode)))))    ;; (format "after-%s-hook" major-mode)
+    ;; (format "after-%s-hook" major-mode)
+    (radian-run-hooks (intern-soft (format "%s-local-vars-hook" major-mode)))))
 
 ;; If the user has disabled `enable-local-variables', then
 ;; `hack-local-variables-hook' is never triggered, so we trigger it at the end
@@ -1010,25 +995,26 @@ If NOW is non-nil, load PACKAGES incrementally, in
         (appendq! radian-incremental-packages packages)
       (while packages
         (let* ((gc-cons-threshold most-positive-fixnum)
-               (req (pop packages)))
-          (unless (featurep req)
-            (radian-log "Incrementally loading %s" req)
+               (req (pop packages))
+               (radian--block-name "Increment"))
+          (if (featurep req)
+              ;; if last have been loaded, should print this.
+              (unless packages (radian-log "has finished works!"))
+            (radian-log "is loading '%s'" req)
             (condition-case-unless-debug e
-                (or (while-no-input
-                      ;; If `default-directory' is a directory that doesn't exist
-                      ;; or is unreadable, Emacs throws up file-missing errors, so
-                      ;; we set it to a directory we know exists and is readable.
-                      (let ((default-directory *emacsd/*)
-                            (inhibit-message t)
-                            file-name-handler-alist)
-                        (require req nil t))
-                      t)
-                    (push req packages))
-              (error
-               (message "Failed to load %S package incrementally, because: %s"
-                        req e)))
+                (while-no-input
+                  ;; If `default-directory' is a directory that doesn't exist
+                  ;; or is unreadable, Emacs throws up file-missing errors, so
+                  ;; we set it to a directory we know exists and is readable.
+                  (let ((default-directory *emacsd/*)
+                        (inhibit-message t)
+                        file-name-handler-alist)
+                    (require req nil t)))
+              (error!
+               (red "Failed to load '%S' incrementally, because: %s") req e))
+            (unless (featurep req) (push req packages))
             (if (not packages)
-                (radian-log "Finished incremental loading")
+                (radian-log "has finished works!")
               (run-with-idle-timer radian-incremental-idle-timer
                                    nil #'radian-load-incrementally
                                    packages t)
@@ -1054,7 +1040,10 @@ If this is a daemon session, load them all immediately instead."
     (let ((fn (make-symbol (format "radian--after-call-%s-h" name))))
       (fset fn
             (lambda (&rest _)
-              (radian-log "Loading deferred package %s from %s" name fn)
+              (when radian-debug-p
+                (let ((inhibit-message (active-minibuffer-window)))
+                  (message
+                   "[Aftercall] is loading deferred package '%s'" name fn)))
               (condition-case e
                   ;; If `default-directory' is a directory that doesn't
                   ;; exist or is unreadable, Emacs throws up file-missing
@@ -1439,7 +1428,7 @@ unquote it using a comma."
 ;; atrocious uptime (namely, the entire service will just go down for
 ;; more than a day at a time on a regular basis). Unacceptable because
 ;; it keeps breaking Radian CI.
-(unless mini-p (sup '(org :host github :repo "emacs-straight/org-mode")))
+;; (sup '(org :host github :repo "emacs-straight/org-mode"))
 
 ;;
 ;;;; Keybinds
@@ -1556,7 +1545,7 @@ all hooks after it are ignored.")
 (with-eval-after-load 'eldoc (eldoc-add-command 'radian/escape))
 
 ;;;; all-the-icons
-(w all-the-icons/md
+(w all-the-icons/m-
   :commands (all-the-icons-octicon
              all-the-icons-faicon
              all-the-icons-fileicon
@@ -2388,15 +2377,6 @@ newline."
                      :files ("*.el" "extensions/*.el"))
   :bind (radian-comma-keymap ("&" . vertico-repeat))
   :hook radian-first-input-hook
-  :init
-  (defadvice! +vertico-crm-indicator-a (args)
-    :filter-args #'completing-read-multiple
-    (cons (format "[CRM%s] %s"
-                  (replace-regexp-in-string
-                   "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
-                   crm-separator)
-                  (car args))
-          (cdr args)))
   :chord (:vertico-map (".." . vertico-quick-exit))
   :config
   (setq vertico-resize nil
@@ -2413,7 +2393,7 @@ newline."
   (-key "DEL" #'vertico-directory-delete-char 'vertico-map)
 
   ;; These commands are problematic and automatically show the *Completions* buffer
-  (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
+  ;; (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
   (declare-function ffap-menu-ask "ffap")
   (eval-after-load 'ffap
     '(advice-add #'ffap-menu-ask
@@ -2424,7 +2404,7 @@ newline."
 
 ;;;; Orderless
 (w orderless
-  :aftercall radian-first-input-hook
+  :commands orderless-filter
   :config
   (defun +vertico-orderless-dispatch (pattern _index _total)
     (cond
@@ -2457,11 +2437,30 @@ newline."
         completion-category-defaults nil
         ;; note that despite override in the name orderless can still be used in
         ;; find-file etc.
-        completion-category-overrides '((file (styles +vertico-basic-remote orderless partial-completion)))
+        completion-category-overrides
+        '((file (styles +vertico-basic-remote orderless partial-completion)))
         orderless-style-dispatchers '(+vertico-orderless-dispatch)
         orderless-component-separator "[ &]")
   ;; ...otherwise find-file gets different highlighting than other commands
   (set-face-attribute 'completions-first-difference nil :inherit nil))
+
+;; Flex scoring and sorting.
+(z fussy/i
+  :straight (fussy :host github :repo "jojojames/fussy")
+  :custom
+  (fussy-score-fn . 'flx-rs-score)
+  (fussy-filter-fn . 'fussy-filter-orderless-flex)
+  :config
+  (setq completion-category-overrides
+        '((file (styles
+                 fussy +vertico-basic-remote orderless partial-completion))))
+  (push 'fussy completion-styles))
+
+(z flx-rs
+  :after fussy
+  :straight
+  (flx-rs :repo "jcs-elpa/flx-rs" :host github :files (:defaults "bin"))
+  :init (fn-quiet! #'flx-rs-load-dyn))
 
 ;;;; Consult
 (w consult
@@ -2593,15 +2592,6 @@ newline."
 
 (w wgrep :commands wgrep-change-to-wgrep-mode :setq (wgrep-auto-save-buffer . t))
 
-;;;; symbols overlay
-(w symbol-overlay/dk
-  :hook
-  ((prog-mode-hook html-mode-hook yaml-mode-hook conf-mode-hook) . symbol-overlay-mode)
-  :config
-  (meow-normal-define-key `("*" . ,(cmd! (or (meow-expand-0) (symbol-overlay-put)))))
-  (define-key symbol-overlay-mode-map (kbd "M-i") 'symbol-overlay-put)
-  (define-key symbol-overlay-mode-map (kbd "M-I") 'symbol-overlay-remove-all))
-
 ;;; MODULE {files}
 ;;;; Project
 (b project/k
@@ -2631,7 +2621,7 @@ newline."
 
   (cl-defmethod project-root ((project (head local)))
     "Project root for PROJECT with HEAD and LOCAL."
-    (cdr project))
+    (expand-file-name (cdr project)))
 
   (defun +project--files-in-directory (dir)
     "Use `fd' to list files in DIR."
@@ -2941,7 +2931,7 @@ and cannot run in."
   (global-prettify-symbols-mode +1))
 
 ;;;; ligature
-(z ligature/d
+(z ligature/d-
   :unless *WINDOWS          ; `ligature' make emacs slow on windows.
   :straight (ligature :host github :repo "mickeynp/ligature.el")
 
@@ -3083,22 +3073,25 @@ and cannot run in."
 
 ;;;; Language servers
 ;; `lsp-bridge' has itself completion-frontend `acm'.
-(sup '(lsp-bridge
-       :files ("acm" "core" "langserver" "*.el" "*.py")
-       :host github :repo "manateelazycat/lsp-bridge" :branch "master"))
-(b lsp-bridge
+(z lsp-bridge
   "The fastest LSP on emacs"
   :url "manateelazycat/lsp-bridge"
   :preface
   ;; `posframe' is dependency of `lisp-bridge'
   (w posframe)
+  (sup '(lsp-bridge
+         :files ("acm" "core" "langserver" "*.el" "*.py")
+         :host github :repo "manateelazycat/lsp-bridge" :branch "master"))
   :when (display-graphic-p)
   :hook (radian-first-buffer-hook . global-lsp-bridge-mode)
   :bind
   ("M-." . lsp-bridge-jump)
   ("M-," . lsp-bridge-jump-back)
+  ("C-M-f" . (cmds! (and lsp-bridge-mode (not(eq major-mode 'emacs-lisp-mode)))
+                    #'lsp-bridge-find-references #'xref-find-references))
+  ("C-M-m" . lsp-bridge-find-impl)
   (radian-comma-keymap ("te" . lsp-bridge-toggle-english-helper))
-
+  (project-current)
   :config
   ;; Mix `lsp-bridge' `xref' and `dumb-jump'.
   (defun lsp-bridge-jump ()
@@ -3182,7 +3175,7 @@ If all failed, try to complete the common part with `corfu-complete'"
     "Enable Corfu in the minibuffer if `completion-at-point' is bound."
     (when (where-is-internal #'completion-at-point (list (current-local-map)))
       (setq-local corfu-auto t) ;Enable/disable auto completion
-      (corfu-mode 1)))
+      (corfu-mode +1)))
   (add-hook 'minibuffer-setup-hook #'corfu-enable-in-minibuffer))
 
 (z corfu-terminal
@@ -3191,7 +3184,7 @@ If all failed, try to complete the common part with `corfu-complete'"
   (popon :type git :repo "https://codeberg.org/akib/emacs-popon.git")
   (corfu-terminal :type git
                   :repo "https://codeberg.org/akib/emacs-corfu-terminal.git")
-  :init (unless (display-graphic-p) (corfu-popup-mode +1)))
+  :init (unless (display-graphic-p) (corfu-terminal-mode +1)))
 
 (w cape/e
   :url "minad/cape"
@@ -3234,8 +3227,7 @@ If all failed, try to complete the common part with `corfu-complete'"
   (add-hook! 'after-change-major-mode-hook
     (defun dumb-jump-enable ()
       "enable `dumb-jump'"
-      (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t)))
-  :bind* ("C-M-f" . xref-find-references))
+      (add-hook 'xref-backend-functions #'dumb-jump-xref-activate nil t))))
 
 ;;;; Syntax checking and code linting
 
@@ -3714,20 +3706,6 @@ Return either a string or nil."
             (let ((venv (string-trim (buffer-string))))
               (when (file-directory-p venv)
                 (cl-return venv)))))))))
-;; lsp for python
-(w lsp-pyright/d
-  :after python-mode lsp-mode
-  :hook (python-mode-hook . radian--lsp-pyright-discover-virtualenvs)
-  :config
-  (defun radian--lsp-pyright-discover-virtualenvs ()
-    "Discover virtualenvs and add them to `lsp-pyright-extra-paths' and `exec-path'."
-    (let ((exec-path exec-path))
-      (when-let ((venv (radian--python-find-virtualenv)))
-        (setq lsp-pyright-extra-paths
-              (file-expand-wildcards
-               (expand-file-name
-                "lib/python*/site-packages" venv)))
-        (push (expand-file-name "bin" venv) exec-path)))))
 
 ;;;; Shell
 ;; http://pubs.opengroup.org/onlinepubs/9699919799/utilities/sh.html
@@ -4029,7 +4007,7 @@ This function calls `json-mode--update-auto-mode' to change the
 
 (defun radian-clone-emacs-source-maybe ()
   "Prompt user to clone Emacs source repository if needed."
-  (when (and (not (file-directory-p source-directory))
+  (when (and (not (file-directory-p (expand-file-name ".git" source-directory)))
              (not (get-buffer "*clone-emacs-src*"))
              (yes-or-no-p "Clone Emacs source repository? "))
     (make-directory (file-name-directory source-directory) 'parents)
@@ -4118,7 +4096,10 @@ messages."
                       (if report-progress
                           "Byte-compiling updated configuration...done"
                         "Byte-compiled updated configuration")))
-                 (message "!! FAILED TO BYTE-COMPILE:\n%s" (buffer-string))))))))))
+                 (message "!! FAILED TO BYTE-COMPILE: %s"
+                          (if (looking-at ".+")
+                              (format ": %s" (match-string 0))
+                            "(No output)"))))))))))
 
   :blackout (emacs-lisp-compilation-mode . "Byte-Compile"))
 
@@ -4150,12 +4131,8 @@ messages."
 ;;;; Organization
 ;; Use (z /m) here because we already installed Org earlier.
 (z org
+  :straight (org :type built-in)
   :chord (",c" . org-capture)
-  :increment
-  calendar find-func format-spec org-macs org-compat org-faces
-  org-entities org-list org-pcomplete org-src org-footnote
-  org-macro ob org org-agenda org-capture
-
   :config
   (req! org)
   (w ox-pandoc)
@@ -4466,7 +4443,7 @@ non-nil value to enable trashing for file operations."
   (osx-trash-setup))
 
 ;;;;; Dired
-(w dirvish/id
+(w dirvish/i-
   :hook (radian-first-file-hook . dirvish-override-dired-mode)
   :custom (dirvish-async-listing-threshold . 10000)
   :setq (dirvish--debouncing-delay . 1)
@@ -5238,10 +5215,16 @@ No tab will created if the command is cancelled."
 ;;;; tree-sitter
 (w tree-sitter
   :leaf-autoload nil
-  :init `(setenv "TREE_SITTER_DIR" ,(concat *cache/* "tree-sitter"))
+  ;; Because `tree-sitter-cli-directory' use "TREE_SITTER_DIR".
+  ;; And we put the custom tree-sitter language (i.e. elisp) so[dll] file in it.
+  :init
+  `(setenv "TREE_SITTER_DIR" ,(concat *cache/* "tree-sitter"))
+  (advice-add 'tsc-dyn-get-ensure :around #'fn-quiet!)
+  (advice-add 'tree-sitter-langs-install-grammars :around #'fn-quiet!)
   :hook
   (tree-sitter-after-on-hook . tree-sitter-hl-mode)
-  (radian-first-buffer-hook . global-tree-sitter-mode))
+  (radian-first-buffer-hook . global-tree-sitter-mode)
+  :blackout " 🌳")
 
 (w tree-sitter-langs/e
   :after tree-sitter
@@ -5250,17 +5233,14 @@ No tab will created if the command is cancelled."
   ;;
   ;; 1. git clone https://github.com/Wilfred/tree-sitter-elisp
   ;; 2. gcc ./src/parser.c -fPIC -I./src/ --shared -o elisp.so[dll]
-  ;; 3. cp ./elisp.so ~/.tree-sitter-langs/bin
+  ;; 3. cp ./elisp.so[dll] ~/.tree-sitter-langs/bin
+  ;; 4. highlights: cp queries/* {tree-sitter-langs repo}/queries/elisp/*
   ;; (~/.tree-sitter-langs/bin is path of your tree-sitter-langs repo)
   (tree-sitter-load 'elisp)
-  (add-to-list 'tree-sitter-major-mode-language-alist '(emacs-lisp-mode . elisp))
-  (add-to-list 'tree-sitter-major-mode-language-alist '(lisp-interaction-mode . elisp)))
+  (add-to-list 'tree-sitter-major-mode-language-alist '(emacs-lisp-mode . elisp)))
 
 ;;; TAIL-CORE 
 )
-
-
-
 
 ;;;; Kill and yank
 (defadvice! radian--advice-stop-kill-at-whitespace
@@ -5669,7 +5649,7 @@ was printed, and only have ElDoc display if one wasn't."
             (scroll-bar . nil)
             (vertical-scroll-bars . nil)
             (internal-border-width . 0)
-            (alpha . (95 . 80))
+            (alpha . (90 . 80))
             ;; (fullscreen . maximized)
             ;; (undecorated . t)
             ,@(eval-cond!
@@ -5825,7 +5805,9 @@ turn it off again after creating the first frame."
 (req! font)
 
 ;;;; mode-line
-(b awesome-tray :hook (radian-load-theme-hook . awesome-tray-mode))
+(b awesome-tray
+  :when (display-graphic-p)
+  :hook (radian-load-theme-hook . awesome-tray-mode))
 
 ;;;; Formfeed display.
 (defun xah-insert-formfeed ()
@@ -6163,7 +6145,7 @@ the unwritable tidbits."
 (radian--run-hook after-init)
 
 ;;; Closing
-(setq radian--current-feature 'normal)
+(setq radian--block-name 'normal)
 
 (unless (or mini-p (bound-and-true-p radian--currently-profiling-p))
   ;; We should only get here if init was successful. If we do,

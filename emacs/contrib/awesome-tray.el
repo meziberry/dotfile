@@ -73,7 +73,7 @@ If nil, don't update the awesome-tray automatically."
   :group 'awesome-tray)
 
 (defcustom awesome-tray-active-modules
-  '("flymake" "location" "belong" "file-path" "vc" "mode-name" "battery" "date")
+  '("flymake" "location" "vc" "belong" "file-path" "buffer-name" "mode-name" "battery" "date")
   "Default active modules."
   :type 'list
   :group 'awesome-tray)
@@ -144,7 +144,7 @@ It will make command `set-mark-command' failed if not use duration."
   :type 'string
   :group 'awesome-tray)
 
-(defcustom awesome-tray-file-path-show-filename t
+(defcustom awesome-tray-file-path-show-filename nil
   "Show filename in file-path module or not."
   :type 'boolean
   :group 'awesome-tray)
@@ -378,7 +378,7 @@ These goes before those shown in their full names."
     ("circe" . (awesome-tray-module-circe-info awesome-tray-module-circe-face))
     ("date" . (awesome-tray-module-date-info awesome-tray-module-date-face))
     ("evil" . (awesome-tray-module-evil-info awesome-tray-module-evil-face))
-    ("file-path" . (awesome-tray-module-file-path-info awesome-tray-module-file-path-face))
+    ("file-path" . (awesome-tray-module-file-path-info))
     ("vc" . (awesome-tray-module-vc-info))
     ("last-command" . (awesome-tray-module-last-command-info awesome-tray-module-last-command-face))
     ("location" . (awesome-tray-module-location-info awesome-tray-module-location-face))
@@ -440,8 +440,10 @@ These goes before those shown in their full names."
          (info (ignore-errors (if face (propertize raw-info 'face face) raw-info))))
     (if func
         (if info
-            (concat (if (equal module-name "battery")
-                        (if (featurep 'meow) (string-trim (meow-indicator)))) info)
+            (concat
+             (if (equal module-name "battery")
+                 (if (featurep 'meow) (string-trim (meow-indicator))))
+             info)
           (propertize "" 'face face))
       (propertize module-name 'face 'awesome-tray-default-face))))
 
@@ -500,7 +502,7 @@ These goes before those shown in their full names."
             )))
 
 (defun awesome-tray-module-date-info ()
-  (format-time-string "%d.%b %H:%M"))
+  (format-time-string "%H:%M"))
 
 (defun awesome-tray-module-last-command-info ()
   (format "%s" last-command))
@@ -556,7 +558,7 @@ NAME is a string, typically a directory name."
     (let* ((file-path (split-string (buffer-file-name) "/" t))
            (shown-path)
            (path-len (length file-path))
-           (modp (if (buffer-modified-p) "*" ""))
+           (modp (if (buffer-modified-p) (propertize "*" 'face 'warning) " "))
            (full-num awesome-tray-file-path-full-dirname-levels)
            (trunc-num awesome-tray-file-path-truncate-dirname-levels)
            (show-name awesome-tray-file-path-show-filename))
@@ -576,11 +578,11 @@ NAME is a string, typically a directory name."
       (when show-name
         (push (car (last file-path)) shown-path))
       (concat modp
-              (if (<= path-len (+ 1 full-num trunc-num))
-                  "/"
-                "./")
-              (string-join (nreverse (cl-remove "" shown-path)) "/")
-              (when (and shown-path (not show-name)) "/")))))
+              (propertize
+               (concat (if (<= path-len (+ 1 full-num trunc-num)) "/")
+                       (string-join (nreverse (cl-remove "" shown-path)) "/")
+                       (when (and shown-path (not show-name)) "/"))
+               'face 'awesome-tray-module-file-path-face)))))
 
 (defun awesome-tray-module-awesome-tab-info ()
   (with-demoted-errors
@@ -754,34 +756,38 @@ NAME is a string, typically a directory name."
       (awesome-tray-enable)
     (awesome-tray-disable)))
 
+(defvar original-mode-line-format mode-line-format)
+
 ;;;###autoload
 (defun awesome-tray-enable ()
   "Turn on the awesome-tray."
   (interactive)
-  ;; Disable any existing awesome-tray to remove conflicts
-  (awesome-tray-disable)
-
   ;; Save mode-line colors when first time.
   ;; Don't change `awesome-tray-mode-line-colors' anymore.
-  (unless awesome-tray-mode-line-colors
-    (setq awesome-tray-mode-line-colors
-          (list (face-attribute 'mode-line :foreground)
-                (face-attribute 'mode-line :background)
-                (face-attribute 'mode-line :family)
-                (face-attribute 'mode-line :box)
-                (face-attribute 'mode-line-inactive :foreground)
-                (face-attribute 'mode-line-inactive :background)
-                (face-attribute 'mode-line-inactive :family)
-                (face-attribute 'mode-line-inactive :box)
-                )))
+  (setq awesome-tray-mode-line-colors
+        (list (face-attribute 'mode-line :foreground)
+              (face-attribute 'mode-line :background)
+              (face-attribute 'mode-line :family)
+              (face-attribute 'mode-line :box)
+              (face-attribute 'mode-line :distant-foreground)
+              (face-attribute 'mode-line :inherit)
+              (face-attribute 'mode-line-inactive :foreground)
+              (face-attribute 'mode-line-inactive :background)
+              (face-attribute 'mode-line-inactive :family)
+              (face-attribute 'mode-line-inactive :box)
+              (face-attribute 'mode-line :distant-foreground)
+              (face-attribute 'mode-line-inactive :inherit)
+              ))
   (setq awesome-tray-mode-line-default-height (face-attribute 'mode-line :height))
 
   ;; Disable mode line.
+  (setq-default mode-line-format "")
   (set-face-attribute 'mode-line nil
                       :foreground awesome-tray-mode-line-active-color
                       :background awesome-tray-mode-line-active-color
                       :height awesome-tray-mode-line-height
-                      :box nil)
+                      :box nil
+                      :inherit 'unspecified)
   (set-face-attribute 'mode-line-inactive nil
                       :foreground awesome-tray-mode-line-inactive-color
                       :background awesome-tray-mode-line-inactive-color
@@ -809,17 +815,22 @@ NAME is a string, typically a directory name."
   "Turn off the awesome-tray."
   (interactive)
   ;; Restore mode-line colors.
+  (setq-default mode-line-format original-mode-line-format)
   (set-face-attribute 'mode-line nil
                       :foreground (nth 0 awesome-tray-mode-line-colors)
                       :background (nth 1 awesome-tray-mode-line-colors)
                       :family (nth 2 awesome-tray-mode-line-colors)
                       :box (nth 3 awesome-tray-mode-line-colors)
+                      :distant-foreground (nth 4 awesome-tray-mode-line-colors)
+                      :inherit (nth 5 awesome-tray-mode-line-colors)
                       :height awesome-tray-mode-line-default-height)
   (set-face-attribute 'mode-line-inactive nil
-                      :foreground (nth 4 awesome-tray-mode-line-colors)
-                      :background (nth 5 awesome-tray-mode-line-colors)
-                      :family (nth 6 awesome-tray-mode-line-colors)
-                      :box (nth 7 awesome-tray-mode-line-colors)
+                      :foreground (nth 6 awesome-tray-mode-line-colors)
+                      :background (nth 7 awesome-tray-mode-line-colors)
+                      :family (nth 8 awesome-tray-mode-line-colors)
+                      :box (nth 9 awesome-tray-mode-line-colors)
+                      :distant-foreground (nth 10 awesome-tray-mode-line-colors)
+                      :inherit (nth 11 awesome-tray-mode-line-colors)
                       :height awesome-tray-mode-line-default-height)
 
   ;; Remove awesome-tray overlays

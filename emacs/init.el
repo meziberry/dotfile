@@ -13,12 +13,17 @@ This is important for Emacs 27 and above, since our early
 init-file just loads the regular init-file, which would lead to
 loading the init-file twice if it were not for this variable.")
 
+(defvar radian--block-name 'core "The feature of current block")
+
 (cond
  ;; If already loaded, do nothing. But still allow re-loading, just
  ;; do it only once during init.
  ((and (not after-init-time) radian--init-file-loaded-p))
  (t
   (setq radian--init-file-loaded-p t)
+
+  ;; Reset to 'core, when reload initfile.
+  (setq radian--block-name 'core)
 
   (defvar radian-minimum-emacs-version "28"
     "Radian Emacs does not support any Emacs version below this.")
@@ -71,6 +76,10 @@ This file is loaded by init.el.")
 Unlike `after-init-hook', this hook is run every time the
 init-file is loaded, not just once.")
 
+      (defvar radian-original-file-name-handler-alist nil
+        "The value of `file-name-handler-alist' during load time.
+`file-name-handler-alist' is set to nil while Radian is loading.")
+
       (unwind-protect
           ;; Load the main Radian configuration code. Disable
           ;; `file-name-handler-alist' to improve load time.
@@ -78,7 +87,9 @@ init-file is loaded, not just once.")
           ;; Make sure not to load an out-of-date .elc file. Since
           ;; we byte-compile asynchronously in the background after
           ;; init succeeds, this case will happen often.
-          (let ((file-name-handler-alist nil)
+          (let ((radian-original-file-name-handler-alist
+                 file-name-handler-alist)
+                (file-name-handler-alist nil)
                 (load-prefer-newer t)
                 (stale-bytecode t))
             (catch 'stale-bytecode
