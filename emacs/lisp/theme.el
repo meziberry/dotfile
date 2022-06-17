@@ -13,7 +13,7 @@
   "Determine using the LIGHT or the DARK color of theme."
   (if (eq theme-light/dark 'light) light dark))
 
-(z modus-themes
+(b modus-themes
   :init
   (setq modus-themes-vivendi-color-overrides
         '((bg-main . "#2E3440"))
@@ -135,7 +135,9 @@
         ;; (bg         (--l?d "#FFFFFF" "#2E3440"))
         ;; (strong     (--l?d "#000000" "#ECEFF4"))
         ;; (subtle     (--l?d "#ECEFF1" "#434C5E"))
-        (warning    (--l?d "#FFF143" "#FAFF72"))
+        (bgsubtle   (--l?d "#dbff4e" "#50616D"))
+        (yellow     (--l?d "#8b7500" "#FFF143"))
+        (warning    (--l?d "#8b0000" "#ffa7ba"))
         (match      (--l?d "#057748" "#BCE672"))
         (critical   (--l?d "#FF6F00" "#EBCB8B"))
         (bright     (--l?d "#FF00FF" "#FF47D1"))
@@ -148,6 +150,10 @@
     (custom-theme-set-faces
      theme
 
+     ;; awesome-tray
+     `(awesome-tray-module-buffer-name-face ((,class :inherit bold :foreground ,warning)))
+     `(awesome-tray-module-location-face ((,class :inherit bold :foreground ,yellow)))
+
      ;; meow
      `(meow-normal-indicator  ((,class (:foreground ,critical :bold t))))
      `(meow-beacon-indicator  ((,class (:foreground ,critical :bold t))))
@@ -156,7 +162,7 @@
      `(meow-motion-indicator  ((,class (:foreground ,critical :bold t))))
 
      ;; whitespace-line
-     `(whitespace-line        ((,class :background ,warning :foreground ,salient)))
+     `(whitespace-line        ((,class :background ,bgsubtle :foreground ,salient)))
 
      ;; vertico
      `(vertico-current        ((,class :background ,faded)))

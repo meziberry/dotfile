@@ -720,8 +720,8 @@ binding the variable dynamically over the entire init-file."
 ;; is essentially a wrapper around `eval-after-load' with a lot
 ;; of handy syntactic sugar and useful features.
 
-(sup 'leaf)
-(sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "noz"))
+(sup '(leaf :repo "meziberry/leaf.el"))
+(sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "w"))
 (sup 'blackout)
 
 (sup 'no-littering)
@@ -745,49 +745,7 @@ binding the variable dynamically over the entire init-file."
 (z leaf-keywords/e
   :bind (radian-comma-keymap ("lf" . leaf-find))
   :config
-
-  ;; 1) Add the :increment :aftercall to leaf
-  (dolist (keyword '(:increment :aftercall))
-    (cl-pushnew keyword leaf-defer-keywords))
-
-  ;; Accept: 't, symbol and list of these (and nested)
-  ;; Return: symbol list.
-  ;; Note  : 'nil is just ignored
-  ;;         remove duplicate element
-  (cl-pushnew '((eq leaf--key :increment)
-                (mapcar (lambda (elm) (if (eq t elm) leaf--name elm))
-                        (delete-dups (leaf-flatten leaf--value))))
-              leaf-normalize)
-
-  ;; :increment t pkg (a b c)
-  (setq leaf-keywords-after-conditions
-        (plist-put
-         leaf-keywords-after-conditions
-         :increment
-         '`((radian-load-incrementally ',leaf--value) ,@leaf--body)))
-
-  ;; :aftercall a-hook b-functions
-  (setq leaf-keywords-after-conditions
-        (plist-put
-         leaf-keywords-after-conditions
-         :aftercall
-         '`((radian-load-aftercall ',leaf--name ',leaf--value) ,@leaf--body)))
-
-  ;; 2) HACK customize :straight and :disabled 's macroexpands
-  ;; Let recipe sole. Recipe specified by user take precedence.
-  (cl-pushnew '((eq leaf--key :straight)
-                (unless (eq (car-safe leaf--value) nil)
-                  (mapcar
-                   (lambda (elm) (if (eq t elm) leaf--name elm))
-                   (if (alist-get leaf--name leaf--value)
-                       (delq t leaf--value)
-                     leaf--value))))
-              leaf-normalize)
-
-
-  ;; 3) HACK :disabled values for `z' macro.
-  ;;; Delete `nil' in `:preface'
-  (cl-pushnew '((eq leaf--key :preface) (delq nil leaf--value)) leaf-normalize)
+  ;; HACK :disabled values for `z' macro.
   (setq leaf-keywords
         (plist-put
          leaf-keywords
@@ -836,22 +794,13 @@ binding the variable dynamically over the entire init-file."
 ;; NOTE :bind imply (map @bds) => (map :package name @bds),
 ;;       Here :package imply `eval-after-load'.
 ;;      :bind-keymap imply `require' leaf--name.
-(z leaf
+(b leaf
   :init
   (plist-put leaf-system-defaults :leaf-defun nil)
   (plist-put leaf-system-defaults :leaf-defvar nil)
-  :init/el-patch
-  (defmacro leaf-key-bind-keymap (key kmap &optional keymap pkg)
-    "Bind KEY to KMAP in KEYMAP (`global-map' if not passed).
-If PKG passed, require PKG before binding."
-    `(progn
-       (el-patch-swap
-         ,(when pkg `(require ,pkg))
-         (when ,pkg (require ,pkg)))
-       (leaf-key ,key ,kmap ,keymap)))
   :config
   ;; the original leaf-find-regexp is a regex string. but we wrap leaf
-  ;; with `x' `w'. it can not locate the leaf block, so we define
+  ;; with `z' `w' `b'. it can not locate the leaf block, so we define
   ;; leaf-find-regexp as a function here.
   (defun leaf-find-regexp (symbol)
     "`leaf-find' use this function to locate block"
@@ -955,15 +904,14 @@ into `regexp-search-ring'"
 
 ;;;; Incremental lazy-loading
 (b incremental
-  :config
-  ;; Incrementally
-  (defvar radian-incremental-packages '(t)
+  :init
+  (defvar incremental--packages '(t)
     "A list of packages to load incrementally after startup. Any large packages
 here may cause noticeable pauses, so it's recommended you break them up into
 sub-packages. For example, `org' is comprised of many packages, and can be
 broken up into:
 
-  (radian-load-incrementally
+  (incremental-load
    '(calendar find-func format-spec org-macs org-compat
      org-faces org-entities org-list org-pcomplete org-src
      org-footnote org-macro ob org org-clock org-agenda
@@ -972,92 +920,99 @@ broken up into:
 This is already done by the lang/org module, however.
 
 If you want to disable incremental loading altogether, either remove
-`radian-load-packages-incrementally-h' from `emacs-startup-hook' or set
-`radian-incremental-first-idle-timer' to nil. Incremental loading does not occur
+`load-packages-incrementally-h' from `emacs-startup-hook' or set
+`incremental--first-idle-timer' to nil. Incremental loading does not occur
 in daemon sessions (they are loaded immediately at startup).")
 
-  (defvar radian-incremental-first-idle-timer 2.0
+  (defvar incremental--first-idle-timer 2.0
     "How long (in idle seconds) until incremental loading starts.
 Set this to nil to disable incremental loading.")
 
-  (defvar radian-incremental-idle-timer 0.75
+  (defvar incremental--idle-timer 0.75
     "How long (in idle seconds) in between incrementally loading packages.")
 
-  (defvar radian-incremental-load-immediately (daemonp)
+  (defvar incremental--load-immediately (daemonp)
     "If non-nil, load all incrementally deferred packages immediately at startup.")
 
-  (defun radian-load-incrementally (packages &optional now)
+  (defun incremental-load (packages &optional now)
     "Registers PACKAGES to be loaded incrementally.
 
 If NOW is non-nil, load PACKAGES incrementally, in
-`radian-incremental-idle-timer' intervals."
+`incremental--idle-timer' intervals."
     (if (not now)
-        (appendq! radian-incremental-packages packages)
+        (appendq! incremental--packages packages)
       (while packages
         (let* ((gc-cons-threshold most-positive-fixnum)
                (req (pop packages))
-               (radian--block-name "Increment"))
+               (radian--block-name "Incremental"))
           (if (featurep req)
               ;; if last have been loaded, should print this.
-              (unless packages (radian-log "has finished works!"))
-            (radian-log "is loading '%s'" req)
+              (unless packages (log! "finished!"))
             (condition-case-unless-debug e
                 (while-no-input
                   ;; If `default-directory' is a directory that doesn't exist
                   ;; or is unreadable, Emacs throws up file-missing errors, so
                   ;; we set it to a directory we know exists and is readable.
-                  (let ((default-directory *emacsd/*)
+                  (let ((default-directory user-emacs-directory)
                         (inhibit-message t)
                         file-name-handler-alist)
                     (require req nil t)))
-              (error!
-               (red "Failed to load '%S' incrementally, because: %s") req e))
-            (unless (featurep req) (push req packages))
+              (error
+               "Failed to load '%S' incrementally, because: %s" req e))
+            (if (featurep req)
+                (log! "load '%s' successfully." req)
+              (push req packages))
             (if (not packages)
-                (radian-log "has finished works!")
-              (run-with-idle-timer radian-incremental-idle-timer
-                                   nil #'radian-load-incrementally
+                (log! "finished!")
+              (run-with-idle-timer incremental--idle-timer
+                                   nil #'incremental-load
                                    packages t)
               (setq packages nil)))))))
 
-  (defun radian-load-packages-incrementally-h ()
-    "Begin incrementally loading packages in `radian-incremental-packages'.
+  (defun incremental--load-packages ()
+    "Begin incrementally loading packages in `incremental--packages'.
 
 If this is a daemon session, load them all immediately instead."
-    (if radian-incremental-load-immediately
-        (mapc #'require (cdr radian-incremental-packages))
-      (when (numberp radian-incremental-first-idle-timer)
-        (run-with-idle-timer radian-incremental-first-idle-timer
-                             nil #'radian-load-incrementally
-                             (cdr radian-incremental-packages) t)))))
+    (if incremental--load-immediately
+        (mapc #'require (cdr incremental--packages))
+      (when (numberp incremental--first-idle-timer)
+        (run-with-idle-timer incremental--first-idle-timer
+                             nil #'incremental-load
+                             (cdr incremental--packages) t))))
+  (unless noninteractive
+    (add-hook 'emacs-startup-hook #'incremental--load-packages)))
 
 ;;;; After-call  SYMBOLS | HOOKS
 (b aftercall
-  :config
-  (defvar radian--deferred-packages-alist '(t))
+  :init
+  (defvar aftercall--deferred-packages-alist '(t))
 
-  (defun radian-load-aftercall (name hooks)
-    (let ((fn (make-symbol (format "radian--after-call-%s-h" name))))
+  (defun aftercall-load (name hooks)
+    (let ((fn (make-symbol (format "aftercall-%s-h" name))))
       (fset fn
             (lambda (&rest _)
               (when radian-debug-p
                 (let ((inhibit-message (active-minibuffer-window)))
                   (message
-                   "[Aftercall] is loading deferred package '%s'" name fn)))
+                   (concat (propertize "[Aftercall]" 'face 'warning)
+                           " loading deferred package '%s'.")
+                   name fn)))
               (condition-case e
                   ;; If `default-directory' is a directory that doesn't
                   ;; exist or is unreadable, Emacs throws up file-missing
                   ;; errors, so we set it to a directory we know exists and
                   ;; is readable.
-                  (let ((default-directory *emacsd/*))
+                  (let ((default-directory user-emacs-directory))
                     (require name))
                 ((debug error)
-                 (message "Failed to load deferred package %s: %s" name e)))
-              (when-let (deferral-list (assq name radian--deferred-packages-alist))
+                 (message "[Aftercall] failed to load package %s: %s!" name e)))
+              (when-let
+                  (deferral-list (assq name aftercall--deferred-packages-alist))
                 (dolist (hook (cdr deferral-list))
                   (advice-remove hook fn)
                   (remove-hook hook fn))
-                (delq! deferral-list radian--deferred-packages-alist)
+                (setq aftercall--deferred-packages-alist
+                      (delq deferral-list aftercall--deferred-packages-alist))
                 (unintern fn nil))))
 
       (dolist (hook hooks)
@@ -1065,9 +1020,9 @@ If this is a daemon session, load them all immediately instead."
             (add-hook hook fn)
           (advice-add hook :before fn)))
 
-      (unless (assq name radian--deferred-packages-alist)
-        (push `(,name) radian--deferred-packages-alist))
-      (nconc (assq name radian--deferred-packages-alist)
+      (unless (assq name aftercall--deferred-packages-alist)
+        (push `(,name) aftercall--deferred-packages-alist))
+      (nconc (assq name aftercall--deferred-packages-alist)
              `(,@hooks)))))
 
 ;;;; Switch buffer/windows/frame functions
@@ -2173,7 +2128,7 @@ or if the current buffer is read-only or not file-visiting."
 
 ;;;; recentf-mode
 (b recentf
-  :increment easymenu tree-widget timer
+  :incr easymenu tree-widget timer
   :commands recentf-open-files
   :setq-default (history-length . 100)
   :custom
@@ -2463,14 +2418,13 @@ newline."
   :init (fn-quiet! #'flx-rs-load-dyn))
 
 ;;;; Consult
+(w consult-dir
+  :after vertico
+  :bind (([remap list-directory] . consult-dir)
+         (vertico-map
+          ("C-x C-d" . consult-dir)
+          ("C-x C-j" . consult-dir-jump-file))))
 (w consult
-  :preface
-  (w consult-dir
-    :after vertico consult
-    :bind (([remap list-directory] . consult-dir)
-           (vertico-map
-            ("C-x C-d" . consult-dir)
-            ("C-x C-j" . consult-dir-jump-file))))
   :init
   (-keys
    (([remap apropos]                      . consult-apropos)
@@ -2561,11 +2515,8 @@ newline."
 
 ;;;; Embark
 (z embark
-  :straight (embark :type git :host github :repo "oantolin/embark"
-                    :files ("embark-consult.el" "embark.el" "embark.texi"
-                            "avy-embark-collect.el"))
-  :pre-setq
-  (prefix-help-command . #'embark-prefix-help-command)
+  :straight (embark :repo "oantolin/embark" :files ("*.el" "embark.texi"))
+  :pre-setq (prefix-help-command . #'embark-prefix-help-command)
   :init
   (-keys (minibuffer-local-map
           ("C-;" . embark-export)
@@ -2808,7 +2759,7 @@ buffer."
 ;;;; server
 (z server
   :when (display-graphic-p)
-  :aftercall radian-first-input-hook radian-first-file-hook focus-out-hook
+  :afterc radian-first-input-hook radian-first-file-hook focus-out-hook
   :init
   (when-let (name (getenv "EMACS_SERVER_NAME"))
     (setq server-name name))
@@ -2931,10 +2882,9 @@ and cannot run in."
   (global-prettify-symbols-mode +1))
 
 ;;;; ligature
-(z ligature/d-
+(w ligature/-
+  :url "mickeynp/ligature.el"
   :unless *WINDOWS          ; `ligature' make emacs slow on windows.
-  :straight (ligature :host github :repo "mickeynp/ligature.el")
-
   :config
   ;; Enable the "www" ligature in every possible major mode
   (ligature-set-ligatures 't '("www"))
@@ -3073,7 +3023,7 @@ and cannot run in."
 
 ;;;; Language servers
 ;; `lsp-bridge' has itself completion-frontend `acm'.
-(z lsp-bridge
+(z lsp-bridge/k
   "The fastest LSP on emacs"
   :url "manateelazycat/lsp-bridge"
   :preface
@@ -3168,7 +3118,7 @@ If all failed, try to complete the common part with `corfu-complete'"
          ("TAB" . smarter-tab-to-complete))
   :init
   (unless (display-graphic-p)
-      (add-hook 'radian-first-buffer-hook #'global-corfu-mode))
+    (add-hook 'radian-first-buffer-hook #'global-corfu-mode))
   :config
   (after! meow (add-hook 'meow-insert-exit-hook #'corfu-quit))
   (defun corfu-enable-in-minibuffer ()
@@ -3390,14 +3340,8 @@ If all failed, try to complete the common part with `corfu-complete'"
     :return "return"
     ;; Other
     :yield "yield"))
-
-;; (w lsp-dart
-;;   :straight treemacs
-;;   :when (featurep! 'lsp-mode)
-;;   :config
-;;   (if *WINDOWS
-;;       (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
-;;             lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")))
+;; (setq lsp-dart-sdk-dir "C:\\ProgramData\\scoop\\apps\\flutter\\current\\bin\\cache\\dart-sdk"
+;;       lsp-dart-flutter-sdk-dir  "C:\\ProgramData\\scoop\\apps\\flutter\\current")
 (w flutter :bind (dart-mode-map ("r" . flutter-run-or-hot-reload)))
 (w hover :when (featurep! 'flutter) :init (set-popup-rule! "\\*Hover\\*" :quit nil))
 
@@ -4337,7 +4281,7 @@ of org-mode to properly utilize ID links.")
   :custom
   (org-roam-database-connector . 'sqlite-builtin)
   (org-roam-file-exclude-regexp . nil)
-  :increment
+  :incr
   ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
   :init/el-patch
   ;; WORKAROUND:
@@ -4925,23 +4869,19 @@ changes, which means that `git-gutter' needs to be re-run.")
 ;; subprocess (so it won't break `git-gutter') but we still need to
 ;; fix the errors in that case. Hence the `eval-when-compile'.
 (straight-register-package 'git-gutter-fringe)
+;; This function is only available when Emacs is built with
+;; X/Cocoa support, see e.g.
+;; <https://github.com/pft/mingus/issues/5>. If we try to
+;; load/configure `git-gutter-fringe' without it, we run into
+;; trouble.
 (when (fboundp 'define-fringe-bitmap)
   (eval-when-compile
     (unless (fboundp 'define-fringe-bitmap)
       (fset 'define-fringe-bitmap #'ignore))
     (unless (boundp 'overflow-newline-into-fringe)
       (setq overflow-newline-into-fringe t)))
-  (w git-gutter-fringe
+  (w git-gutter-fringe/e
     :after git-gutter
-    :init
-    ;; This function is only available when Emacs is built with
-    ;; X/Cocoa support, see e.g.
-    ;; <https://github.com/pft/mingus/issues/5>. If we try to
-    ;; load/configure `git-gutter-fringe' without it, we run into
-    ;; trouble.
-    (when (fboundp 'define-fringe-bitmap)
-      (require 'git-gutter-fringe))
-
     :config
     (fringe-helper-define 'radian--git-gutter-blank nil
       "........"
@@ -5056,8 +4996,7 @@ Instead, display simply a flat colored region in the fringe."
 
 ;;;; calendar
 (w cal-china-x
-  :after calendar
-  :aftercall calendar
+  :afterc calendar
   :setq (calendar-week-start-day . 0)
   :config
   (setq
@@ -5807,6 +5746,7 @@ turn it off again after creating the first frame."
 ;;;; mode-line
 (b awesome-tray
   :when (display-graphic-p)
+  :custom (awesome-tray-date-format . "%d.%H:%M")
   :hook (radian-load-theme-hook . awesome-tray-mode))
 
 ;;;; Formfeed display.
@@ -6105,9 +6045,8 @@ two inserted lines are the same."
       (default-indent-new-line))))
 
 ;;;; savehist for session
+;; persist variables across sessions
 (z savehist
-  ;; persist variables across sessions
-  :increment custom
   :hook radian-first-input-hook
   :config
   (setq savehist-save-minibuffer-history t
@@ -6193,7 +6132,6 @@ the unwritable tidbits."
 (unless noninteractive
   (add-hook 'after-change-major-mode-hook #'radian-run-local-var-hooks-maybe-h 100)
   (add-hook 'hack-local-variables-hook #'radian-run-local-var-hooks-h)
-  (add-hook 'emacs-startup-hook #'radian-load-packages-incrementally-h)
   (add-hook 'window-setup-hook #'radian-display-benchmark-h 'append)
   (radian-run-hook-on 'radian-first-buffer-hook '(find-file-hook radian-switch-buffer-hook))
   (radian-run-hook-on 'radian-first-file-hook   '(find-file-hook dired-initial-position-hook))

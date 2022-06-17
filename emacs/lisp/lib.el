@@ -63,7 +63,7 @@ list is returned as-is."
   (cl-check-type keyword keyword)
   (substring (symbol-name keyword) 1))
 
-(defmacro radian-log (format-string &rest args)
+(defmacro log! (format-string &rest args)
   "Log to *Messages* if `radian-debug-p' is on.
 Does not display text in echo area, but still logs to *Messages*. Accepts the
 same arguments as `message'."
@@ -957,7 +957,7 @@ In either case, eagerly load FEATURE during byte-compilation."
                (refs (prog1 (plist-get options :url) (cl-remf options :url)))
                (fopts (cl-loop for (c . p) in
                                '((?e . (:require t))      (?s . (:straight t))
-                                 (?k . (:blackout t))     (?i . (:increment t))
+                                 (?k . (:blackout t))     (?i . (:incr t))
                                  (?m . (:disabled 'mini)) (?d . (:disabled t))
                                  (?b . (:disabled 'block)))
                                when (cl-find c flags) append p))

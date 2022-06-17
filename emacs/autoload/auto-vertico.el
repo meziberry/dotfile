@@ -32,27 +32,7 @@
                   " ."))
          (query (or query
                     (when (use-region-p)
-                      (regexp-quote (radian-thing-at-point-or-region)))))
-         (consult-async-split-style consult-async-split-style)
-         (consult-async-split-styles-alist consult-async-split-styles-alist))
-    ;; Change the split style if the initial query contains the separator.
-    (when query
-      (cl-destructuring-bind (&key type separator initial)
-          (consult--async-split-style)
-        (pcase type
-          (`separator
-           (replace-regexp-in-string (regexp-quote (char-to-string separator))
-                                     (concat "\\" (char-to-string separator))
-                                     query t t))
-          (`perl
-           (when (string-match-p initial query)
-             (setf (alist-get 'perlalt consult-async-split-styles-alist)
-                   `(:initial ,(or (cl-loop for char in (list "%" "@" "!" "&" "/" ";")
-                                            unless (string-match-p char query)
-                                            return char)
-                                   "%")
-                     :type perl)
-                   consult-async-split-style 'perlalt))))))
+                      (regexp-quote (radian-thing-at-point-or-region))))))
     (consult-ripgrep directory query)))
 
 ;;;###autoload

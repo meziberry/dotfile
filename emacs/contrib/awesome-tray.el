@@ -84,6 +84,11 @@ If nil, don't update the awesome-tray automatically."
   :type 'list
   :group 'awesome-tray)
 
+(defcustom awesome-tray-date-format "%d.%b %H:%M %a"
+  "Format string of the date module."
+  :group 'awesome-tray
+  :type 'string)
+
 (defcustom awesome-tray-buffer-name-max-length 20
   "Max length of buffer name."
   :group 'awesome-tray
@@ -213,9 +218,9 @@ These goes before those shown in their full names."
 
 (defface awesome-tray-module-location-face
   '((((background light))
-     :foreground "#cc7700" :bold t)
+     :foreground "sienna" :bold t)
     (t
-     :foreground "#ff9500" :bold t))
+     :foreground "gold" :bold t))
   "Location face."
   :group 'awesome-tray)
 
@@ -237,9 +242,9 @@ These goes before those shown in their full names."
 
 (defface awesome-tray-module-buffer-name-face
   '((((background light))
-     :foreground "#cc7700" :bold t)
+     :foreground "sienna" :bold t)
     (t
-     :foreground "#ff9500" :bold t))
+     :foreground "gold" :bold t))
   "Buffer name face."
   :group 'awesome-tray)
 
@@ -502,7 +507,8 @@ These goes before those shown in their full names."
             )))
 
 (defun awesome-tray-module-date-info ()
-  (format-time-string "%H:%M"))
+  "Display the date"
+  (format-time-string awesome-tray-date-format))
 
 (defun awesome-tray-module-last-command-info ()
   (format "%s" last-command))
