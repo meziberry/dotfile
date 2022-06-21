@@ -366,10 +366,10 @@ at the first function to return non-nil.")
                   (require lang nil t))
          (add-to-list 'org-babel-load-languages (cons lang t)))))
 
-   (defadvice! +org--export-lazy-load-library-h ()
+   (defadvice! +org--export-lazy-load-library-h (&optional element)
      "Lazy load a babel package when a block is executed during exporting."
      :before #'org-babel-exp-src-block
-     (+org--babel-lazy-load-library-a (org-babel-get-src-block-info)))
+     (+org--babel-lazy-load-library-a (org-babel-get-src-block-info nil element)))
 
    (defadvice! +org--src-lazy-load-library-a (lang)
      "Lazy load a babel package to ensure syntax highlighting."
@@ -549,6 +549,31 @@ relative to `org-directory', unless it is an absolute path."
             '("wolfram"     . "https://wolframalpha.com/input/?i=%s"))
 
   (+org-define-basic-link "org" 'org-directory)
+  (+org-define-basic-link ".emacs" '*emacsd/*)
+  (+org-define-basic-link "rcontrib" '*radian-contrib/*)
+  (+org-define-basic-link "rlisp" '*radian-lisp/*)
+
+  (defadvice! +org--follow-search-string-a (fn link &optional arg)
+    "Support ::SEARCH syntax for id: links."
+    :around #'org-id-open
+    :around #'org-roam-id-open
+    (save-match-data
+      (cl-destructuring-bind (id &optional search)
+          (split-string link "::")
+        (prog1 (funcall fn id arg)
+          (cond ((null search))
+                ((string-match-p "\\`[0-9]+\\'" search)
+                 ;; Move N lines after the ID (in case it's a heading), instead
+                 ;; of the start of the buffer.
+                 (forward-line (string-to-number option)))
+                ((string-match "^/\\([^/]+\\)/$" search)
+                 (let ((match (match-string 1 search)))
+                   (save-excursion (org-link-search search))
+                   ;; `org-link-search' only reveals matches. Moving the point
+                   ;; to the first match after point is a sensible change.
+                   (when (re-search-forward match)
+                     (goto-char (match-beginning 0)))))
+                ((org-link-search search)))))))
 
   ;; Allow inline image previews of http(s)? urls or data uris.
   ;; `+org-http-image-data-fn' will respect `org-display-remote-inline-images'.
@@ -929,9 +954,23 @@ compelling reason, so..."
   (+org-init-hacks-h)
   (+org-init-keybinds-h)
   (+org-init-popup-rules-h)
-  ;; (+org-init-protocol-h)
-  ;; (+org-init-protocol-lazy-loader-h)
   (+org-init-smartparens-h))
+
+
+;; Wait until an org-protocol link is opened via emacsclient to load
+;; `org-protocol'. Normally you'd simply require `org-protocol' and use it,
+;; but the package loads all of org for no compelling reason, so...
+(defadvice! +org--server-visit-files-a (fn files &rest args)
+  "Advise `server-visit-files' to load `org-protocol' lazily."
+  :around #'server-visit-files
+  (if (not (cl-loop for var in files
+                    if (string-match-p "://" (car var))
+                    return t))
+      (apply fn files args)
+    (require 'org-protocol)
+    (apply #'org--protocol-detect-protocol-server fn files args)))
+(after! org-protocol
+  (advice-remove 'server-visit-files #'org--protocol-detect-protocol-server))
 
 ;; (Re)activate eldoc-mode in org-mode a little later, because it disables
 ;; itself if started too soon (which is the case with `global-eldoc-mode').

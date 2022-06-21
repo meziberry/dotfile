@@ -135,7 +135,7 @@
         ;; (bg         (--l?d "#FFFFFF" "#2E3440"))
         ;; (strong     (--l?d "#000000" "#ECEFF4"))
         ;; (subtle     (--l?d "#ECEFF1" "#434C5E"))
-        (bgsubtle   (--l?d "#dbff4e" "#50616D"))
+        (bgalt      (--l?d "#dbff4e" "#50616D"))
         (yellow     (--l?d "#8b7500" "#FFF143"))
         (warning    (--l?d "#8b0000" "#ffa7ba"))
         (match      (--l?d "#057748" "#BCE672"))
@@ -162,7 +162,7 @@
      `(meow-motion-indicator  ((,class (:foreground ,critical :bold t))))
 
      ;; whitespace-line
-     `(whitespace-line        ((,class :background ,bgsubtle :foreground ,salient)))
+     `(whitespace-line        ((,class :background ,bgalt :foreground ,salient)))
 
      ;; vertico
      `(vertico-current        ((,class :background ,faded)))
@@ -179,8 +179,8 @@
      `(git-gutter-fr:modified ((,class :background ,popout)))
 
      ;; M-x prompt-face
-     `(minibuffer-prompt      ((,class (:foreground ,prompt))))
-     `(comint-highlight-input ((,class (:foreground ,match :bold t))))))
+     `(minibuffer-prompt      ((,class (:foreground ,prompt :inherit bold))))
+     `(comint-highlight-input ((,class (:foreground ,match))))))
   (enable-theme theme))
 
 (defun radian/change-theme ()

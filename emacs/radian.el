@@ -432,8 +432,8 @@ hook directly into the init-file during byte-compilation."
 ;; Contrary to what many Emacs users have in their configs, you really don't
 ;; need more than this to make UTF-8 the default coding system:
 (defun init-coding-system-h ()
-  ;; (set-language-environment "UTF-8")
-  (set-locale-environment "en_US.UTF-8")
+  (set-language-environment "UTF-8")
+  ;; (set-locale-environment "en_US.UTF-8")
   (when *WINDOWS
     (set-clipboard-coding-system 'utf-16-le)
     (set-selection-coding-system 'utf-16-le))
@@ -720,10 +720,9 @@ binding the variable dynamically over the entire init-file."
 ;; is essentially a wrapper around `eval-after-load' with a lot
 ;; of handy syntactic sugar and useful features.
 
-(sup '(leaf :repo "meziberry/leaf.el"))
-(sup '(leaf-keywords :repo "meziberry/leaf-keywords.el" :branch "w"))
+(sup '(leaf :host github :repo "meziberry/leaf.el"))
+(sup '(leaf-keywords :host github :repo "meziberry/leaf-keywords.el" :branch "w"))
 (sup 'blackout)
-
 (sup 'no-littering)
 (setq no-littering-etc-directory *etc/*
       no-littering-var-directory *cache/*)
@@ -811,7 +810,7 @@ binding the variable dynamically over the entire init-file."
 
 ;;;; Meow
 (z meow
-  :straight (meow :repo "meow-edit/meow" :branch "master")
+  :straight (meow :host github :repo "meow-edit/meow" :branch "master")
   :custom
   (meow-use-cursor-position-hack . t)
   (meow-use-enhanced-selection-effect . t)
@@ -2423,7 +2422,10 @@ newline."
   :bind (([remap list-directory] . consult-dir)
          (vertico-map
           ("C-x C-d" . consult-dir)
-          ("C-x C-j" . consult-dir-jump-file))))
+          ("C-x C-j" . consult-dir-jump-file)))
+  :config
+  (add-to-list 'consult-dir-sources 'consult-dir--source-tramp-ssh t)
+  (add-to-list 'consult-dir-sources 'consult-dir--source-tramp-local t))
 (w consult
   :init
   (-keys
@@ -2529,6 +2531,7 @@ newline."
   ("C-x g" . (cmds! (featurep 'magit-status) #'magit-status #'+vertico/embark-magit-status))
   :hook (embark-collect-mode-hook . consult-preview-at-point-mode)
   :config
+  (set-popup-rule! "^\\*Embark Export:" :size 0.35 :ttl 0 :quit nil)
   (eval-after-load 'consult '(require 'embark-consult)))
 
 (w marginalia
@@ -3015,7 +3018,7 @@ and cannot run in."
            '(((lambda (limit)
                 (let (case-fold-search)
                   (and (re-search-forward hl-todo-regexp limit t)
-                       (memq 'font-lock-comment-face (radian-enlist (get-text-property (point) 'face))))))
+                       (memq 'font-lock-comment-face (ensure-list (get-text-property (point) 'face))))))
               (1 (hl-todo-get-face) t t))))
       (when hl-todo-mode
         (hl-todo-mode -1)
@@ -3798,55 +3801,25 @@ poke it. Otherwise the modified text remains unfontified."
 ;; This package include `gitconfig-mode' `gitignore-mode' `gitattributes-mode'
 (w git-modes :init (z gitconfig-mode :mode "\\.gitconfig.*"))
 
-;; Package `json-mode' provides a major mode for JSON.
-(w json-mode
+;; `jsonian-mode' provides a major mode for JSON whitout filesize limit.
+(z jsonian
+  :straight (jsonian :host github :repo "iwahbe/jsonian")
   :init/el-patch
-  (defconst json-mode-standard-file-ext '(".json" ".jsonld")
-    "List of JSON file extensions.")
-
-  (defsubst json-mode--update-auto-mode (filenames)
-    "Update the `json-mode' entry of `auto-mode-alist'.
-
-FILENAMES should be a list of file as string.
-Return the new `auto-mode-alist' entry"
-    (let* ((new-regexp
-            (rx-to-string
-             `(seq (eval
-                    (cons 'or
-                          (append json-mode-standard-file-ext
-                                  ',filenames)))
-                   eot)))
-           (new-entry (cons new-regexp 'json-mode))
-           (old-entry (when (boundp 'json-mode--auto-mode-entry)
-                        json-mode--auto-mode-entry)))
-      (setq auto-mode-alist (delete old-entry auto-mode-alist))
-      (add-to-list 'auto-mode-alist new-entry)
-      new-entry))
-
-  (defcustom json-mode-auto-mode-list '(".babelrc" ".bowerrc" "composer.lock")
-    "List of filename as string to pass for the JSON entry of
-`auto-mode-alist'.
-
-Note however that custom `json-mode' entries in `auto-mode-alist'
-won’t be affected."
-    :group 'json-mode
-    :type '(repeat string)
-    :set (lambda (symbol value)
-           "Update SYMBOL with a new regexp made from VALUE.
-
-This function calls `json-mode--update-auto-mode' to change the
-`json-mode--auto-mode-entry' entry in `auto-mode-alist'."
-           (set-default symbol value)
-           (setq json-mode--auto-mode-entry
-                 (json-mode--update-auto-mode value))))
-
-  (defvar json-mode--auto-mode-entry
-    (json-mode--update-auto-mode json-mode-auto-mode-list)
-    "Regexp generated from the `json-mode-auto-mode-list'.")
-
+  (defun jsonian-no-so-long-mode ()
+    "Prevent `so-long-mode' from supplanting `jsonian-mode'."
+    (interactive)
+    (unless (boundp 'so-long-predicate)
+      (user-error "`so-long' mode needs to be loaded"))
+    (let ((orf so-long-predicate))
+      (setq so-long-predicate
+            (lambda ()  (unless (eq major-mode 'jsonian-mode)
+                     (funcall orf))))))
+  :mode
+  ("\\(?:\\(?:\\.\\(?:b\\(?:\\(?:abel\\|ower\\)rc\\)
+\\|json\\(?:ld\\)?\\)\\|composer\\.lock\\)\\'\\)" . jsonian-mode)
+  :init (after! so-long (jsonian-no-so-long-mode))
   :config
-
-  (add-hook! 'json-mode-hook
+  (add-hook! 'jsonian-mode-local-vars-hook
     (defun radian--fix-json-indentation ()
       "Set the tab width to 2 for JSON."
       (setq-local tab-width 2))))
@@ -3897,7 +3870,7 @@ This function calls `json-mode--update-auto-mode' to change the
   :init
   ;; Treat flake.lock files as json. Fall back to js-mode because it's faster
   ;; than js2-mode, and its extra features aren't needed there.
-  (add-to-list 'auto-mode-alist '("/flake\\.lock\\'" . json-mode))
+  (add-to-list 'auto-mode-alist '("/flake\\.lock\\'" . jsonian-mode))
   :config
   (b nix-drv-mode :mode "\\.drv\\'")
   (b nix-repl :commands nix-repl)
@@ -4074,7 +4047,7 @@ messages."
 
 ;;;; Organization
 ;; Use (z /m) here because we already installed Org earlier.
-(z org
+(z org/i
   :straight (org :type built-in)
   :chord (",c" . org-capture)
   :config
@@ -4281,8 +4254,7 @@ of org-mode to properly utilize ID links.")
   :custom
   (org-roam-database-connector . 'sqlite-builtin)
   (org-roam-file-exclude-regexp . nil)
-  :incr
-  ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
+  :incr ansi-color dash f rx seq magit-section emacsql emacsql-sqlite
   :init/el-patch
   ;; WORKAROUND:
   ;; https://github.com/org-roam/org-roam/issues/1221#issuecomment-959871775
@@ -4941,7 +4913,7 @@ Instead, display simply a flat colored region in the fringe."
 ;; Package `esup' allows you to run a child Emacs process with special
 ;; profiling functionality, and to collect timing results for each
 ;; form in your init-file.
-(w esup
+(w esup/-
   :defer-config
 
   ;; Work around a bug where esup tries to step into the byte-compiled
@@ -5570,7 +5542,10 @@ was printed, and only have ElDoc display if one wasn't."
   ;; We need to do this both before and after Apheleia is loaded
   ;; because the autoloading is set up such that the minor mode
   ;; definition is evaluated twice.
-  (blackout 'apheleia-mode))
+  (blackout 'apheleia-mode)
+
+  :defer-config
+  (add-to-list 'apheleia-mode-alist '(jsonian-mode . prettier)))
 
 ;;;; Appearance
 ;;;; pixel-scroll
@@ -5744,9 +5719,71 @@ turn it off again after creating the first frame."
 (req! font)
 
 ;;;; mode-line
+;;;; Default Mode-line format
+;; Normally the buffer name is right-padded with whitespace until it
+;; is at least 12 characters. This is a waste of space, so we
+;; eliminate the padding here. Check the docstrings for more
+;; information.
+(setq-default mode-line-buffer-identification
+              (propertized-buffer-identification "%b"))
+
+;; Make `mode-line-position' show the column, not just the row.
+(column-number-mode +1)
+
+;; https://emacs.stackexchange.com/a/7542/12534
+(defun radian--mode-line-align (left right)
+  "Render a left/right aligned string for the mode line.
+LEFT and RIGHT are strings, and the return value is a string that
+displays them left- and right-aligned respectively, separated by
+spaces."
+  (let ((width (- (window-total-width) (length left))))
+    (format (format "%%s%%%ds" width) left right)))
+
+;; <https://github.com/minad/recursion-indicator>
+;; remove the default recursion indicator
+(cl-loop with index = 0
+         for e in mode-line-modes do
+         (cond ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
+                (setf (nth index mode-line-modes) ""))
+               ;; ((equal "(" e) (setf (nth index mode-line-modes) "#"))
+               ((equal ")" e) (setf (nth index mode-line-modes) ";)")))
+         (setq index (1+ index)))
+
+(defcustom radian-mode-line-left
+  '((:propertize ("" mode-line-mule-info) display (min-width (5.0)))
+    (:eval (when (featurep 'meow) (string-trim-right (meow-indicator))))
+    "%*" "%@"
+    "  "
+    ;; Show the name of the current buffer.
+    mode-line-buffer-identification
+    mode-line-front-space
+    ;; Show the row and column of point.
+    mode-line-position
+    ;; Show the active major and minor modes.
+    " "
+    (vc-mode vc-mode)
+    mode-line-front-space
+    mode-line-modes
+    mode-line-misc-info)
+  "Composite mode line construct to be shown left-aligned."
+  :type 'sexp)
+                                        ;⊙_⚆⚈☭
+(defcustom radian-mode-line-right '()
+  "Composite mode line construct to be shown right-aligned."
+  :type 'sexp)
+
+;; Actually reset the mode line format to show all the things we just
+;; defined.
+(setq-default mode-line-format
+              '(:eval (replace-regexp-in-string
+                       "%" "%%"
+                       (radian--mode-line-align
+                        (format-mode-line radian-mode-line-left)
+                        (format-mode-line radian-mode-line-right))
+                       'fixedcase 'literal)))
+
 (b awesome-tray
   :when (display-graphic-p)
-  :custom (awesome-tray-date-format . "%d.%H:%M")
   :hook (radian-load-theme-hook . awesome-tray-mode))
 
 ;;;; Formfeed display.
@@ -6128,15 +6165,15 @@ the unwritable tidbits."
 ;; Initialize UI as late as possible. `window-buffer-change-functions' runs
 ;; once, when the scratch/dashboard buffer is first displayed.
 (add-hook 'window-buffer-change-functions #'radian-init-ui-h -100)
+;; Bootstrap the interactive session
+(add-hook 'after-change-major-mode-hook #'radian-run-local-var-hooks-maybe-h 100)
+(add-hook 'hack-local-variables-hook #'radian-run-local-var-hooks-h)
+(add-hook 'window-setup-hook #'radian-display-benchmark-h 105)
+(radian-run-hook-on 'radian-first-buffer-hook '(find-file-hook radian-switch-buffer-hook))
+(radian-run-hook-on 'radian-first-file-hook   '(find-file-hook dired-initial-position-hook))
+(radian-run-hook-on 'radian-first-input-hook  '(pre-command-hook))
 
-(unless noninteractive
-  (add-hook 'after-change-major-mode-hook #'radian-run-local-var-hooks-maybe-h 100)
-  (add-hook 'hack-local-variables-hook #'radian-run-local-var-hooks-h)
-  (add-hook 'window-setup-hook #'radian-display-benchmark-h 'append)
-  (radian-run-hook-on 'radian-first-buffer-hook '(find-file-hook radian-switch-buffer-hook))
-  (radian-run-hook-on 'radian-first-file-hook   '(find-file-hook dired-initial-position-hook))
-  (radian-run-hook-on 'radian-first-input-hook  '(pre-command-hook))
-  (add-hook 'radian-first-buffer-hook #'gcmh-mode))
+(add-hook 'radian-first-buffer-hook #'gcmh-mode)
 
 
 

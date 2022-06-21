@@ -101,7 +101,7 @@ The search recurses up to DEPTH and no further. DEPTH is an integer.
 
 MATCH is a string regexp. Only entries that match it will be included."
   (let (result)
-    (dolist (file (mapcan (radian-rpartial #'radian-glob "*") (radian-enlist paths)))
+    (dolist (file (mapcan (radian-rpartial #'radian-glob "*") (ensure-list paths)))
       (cond ((file-directory-p file)
              (appendq!
               result

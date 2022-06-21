@@ -106,7 +106,7 @@ Pretty symbols can be unset for emacs-lisp-mode with:
   (set-ligatures! 'emacs-lisp-mode nil)"
   (declare (indent defun))
   (if (null (car-safe plist))
-      (dolist (mode (radian-enlist modes))
+      (dolist (mode (ensure-list modes))
         (delq! mode +ligatures-extra-alist 'assq))
     (let (results)
       (while plist
@@ -115,7 +115,7 @@ Pretty symbols can be unset for emacs-lisp-mode with:
               (prependq! results (pop plist))
             (when-let (char (plist-get +ligatures-extra-symbols key))
               (push (cons (pop plist) char) results)))))
-      (dolist (mode (radian-enlist modes))
+      (dolist (mode (ensure-list modes))
         (setf (alist-get mode +ligatures-extra-alist)
               (if-let (old-results (alist-get mode +ligatures-extra-alist))
                   (dolist (cell results old-results)

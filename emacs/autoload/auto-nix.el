@@ -26,23 +26,12 @@
        (save-excursion
          (skip-chars-forward "^ ")
          (point))))))
-  (cond ((featurep! :completion helm)
-         (require 'helm-nixos-options)
-         ;; REVIEW We reimplment `helm-nixos-options' so we can supply
-         ;; `initial-input'. Maybe use `helm-attrset' instead?
-         (helm :sources `(,(helm-source-nixos-options-search))
-               :buffer "*helm-nixos-options*"
-               :input initial-input))
-        ((featurep! :completion ivy)
-         (require 'nixos-options)
-         (ivy-read "NixOS options: "
-                   nixos-options
-                   :require-match t
-                   :initial-input initial-input
-                   :action #'+nix--options-action
-                   :caller '+nix/options))
-        ;; TODO Add general `completing-read' support
-        ((user-error "No search engine is enabled. Enable helm or ivy!")))
+  (when +nix--options-action
+    (cdr (assoc (completing-read "NixOs options: "
+                                 nixos-options
+                                 nil
+                                 t
+                                 initial-input) nixos-options)))
   ;; Tell lookup module to let us handle things from here
   'deferred)
 

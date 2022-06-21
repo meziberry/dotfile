@@ -11,71 +11,6 @@
 
 ;;; Code:
 
-;;;; Default Mode-line format
-;; Normally the buffer name is right-padded with whitespace until it
-;; is at least 12 characters. This is a waste of space, so we
-;; eliminate the padding here. Check the docstrings for more
-;; information.
-(setq-default mode-line-buffer-identification
-              (propertized-buffer-identification "%b"))
-
-;; Make `mode-line-position' show the column, not just the row.
-(column-number-mode +1)
-
-;; https://emacs.stackexchange.com/a/7542/12534
-(defun radian--mode-line-align (left right)
-  "Render a left/right aligned string for the mode line.
-LEFT and RIGHT are strings, and the return value is a string that
-displays them left- and right-aligned respectively, separated by
-spaces."
-  (let ((width (- (window-total-width) (length left))))
-    (format (format "%%s%%%ds" width) left right)))
-
-;; <https://github.com/minad/recursion-indicator>
-;; remove the default recursion indicator
-(cl-loop with index = 0
-         for e in mode-line-modes do
-         (cond ((and (stringp e) (string-match-p "^\\(%\\[\\|%\\]\\)$" e))
-                (setf (nth index mode-line-modes) ""))
-               ;; ((equal "(" e) (setf (nth index mode-line-modes) "#"))
-               ((equal ")" e) (setf (nth index mode-line-modes) ";)")))
-         (setq index (1+ index)))
-
-(defcustom radian-mode-line-left
-  '((:propertize ("" mode-line-mule-info) display (min-width (5.0)))
-    "%*" "%@"
-    " "     ;; Show the name of the current buffer.
-    mode-line-buffer-identification
-    mode-line-front-space
-    ;; Show the row and column of point.
-    mode-line-position
-    ;; Show the active major and minor modes.
-    " "
-    mode-line-modes
-    mode-line-misc-info)
-  "Composite mode line construct to be shown left-aligned."
-  :type 'sexp)
-
-(defcustom radian-mode-line-right          ;⊙_⚆⚈☭
-  '("%e"
-    (vc-mode vc-mode)
-    " "
-    (:eval (when (featurep 'meow) (meow-indicator)))
-    mode-line-end-spaces)
-  "Composite mode line construct to be shown right-aligned."
-  :type 'sexp)
-
-;; Actually reset the mode line format to show all the things we just
-;; defined.
-(setq-default mode-line-format
-              '(:eval (replace-regexp-in-string
-                       "%" "%%"
-                       (radian--mode-line-align
-                        (format-mode-line radian-mode-line-left)
-                        (format-mode-line radian-mode-line-right))
-                       'fixedcase 'literal)))
-
-
 (require 'all-the-icons nil t)
 
 (defun +modeline--set-var-and-refresh-bars-fn (&optional symbol value)
@@ -225,7 +160,7 @@ If DEFAULT is non-nil, apply to all future buffers. Modelines are defined with
   "Set the modeline to NAME on HOOKS.
 See `def-modeline!' on how modelines are defined."
   (let ((fn (intern (format "+modeline-set-%s-format-h" name))))
-    (dolist (hook (radian-enlist hooks))
+    (dolist (hook (ensure-list hooks))
       (when after-init-time
         (dolist (name (mapcar #'car +modeline-format-alist))
           (remove-hook hook (intern (format "+modeline-set-%s-format-h" name)))))
