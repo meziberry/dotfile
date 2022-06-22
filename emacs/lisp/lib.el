@@ -175,7 +175,7 @@ NAME, ARGLIST, and BODY are the same as `defun', `defun*', `defmacro', and
                   ,(if (eq type 'defun*)
                        `(cl-labels ((,@rest)) ,body)
                      `(cl-letf (((symbol-function ',(car rest))
-                                 (fn! ,(cadr rest) ,@(cddr rest))))
+                                 (lambda! ,(cadr rest) ,@(cddr rest))))
                         ,body))))
               (_
                (when (eq (car-safe type) 'function)
@@ -274,7 +274,7 @@ See `eval-cond!' for details on this macro's purpose."
           `(eval-cond! ,@rest)))))
 
 ;;;; Closure factories
-(defmacro fn! (arglist &rest body)
+(defmacro lambda! (arglist &rest body)
   "Returns (cl-function (lambda ARGLIST BODY...))
 The closure is wrapped in `cl-function', meaning ARGLIST will accept anything
 `cl-defun' will. Implicitly adds `&allow-other-keys' if `&key' is present in
@@ -304,13 +304,15 @@ ARGLIST."
          (allow-other-keys arglist))
       ,@body)))
 
+(put 'radian--fn-crawl 'lookup-table
+     '((_  . 0) (_  . 1) (%2 . 2) (%3 . 3) (%4 . 4)
+       (%5 . 5) (%6 . 6) (%7 . 7) (%8 . 8) (%9 . 9)))
 (defun radian--fn-crawl (data args)
   (cond ((symbolp data)
-         (when-let*
-             ((lookup '(_ _ %2 %3 %4 %5 %6 %7 %8 %9))
-              (pos (cond ((eq data '%*) 0)
-                         ((memq data '(% %1)) 1)
-                         ((cdr (assq data (seq-map-indexed #'cons lookup)))))))
+         (when-let
+             (pos (cond ((eq data '%*) 0)
+                        ((memq data '(% %1)) 1)
+                        ((cdr (assq data (get 'radian--fn-crawl 'lookup-table))))))
            (when (and (= pos 1)
                       (aref args 1)
                       (not (eq data (aref args 1))))
@@ -319,10 +321,13 @@ ARGLIST."
         ((and (not (eq (car-safe data) '!))
               (or (listp data)
                   (vectorp data)))
-         (seq-doseq (elt data)
-           (radian--fn-crawl elt args)))))
+         (let ((len (length data))
+               (i 0))
+           (while (< i len)
+             (radian--fn-crawl (elt data i) args)
+             (cl-incf i))))))
 
-(defmacro fn!! (&rest args)
+(defmacro fn! (&rest args)
   "Return an lambda with implicit, positional arguments.
 The function's arguments are determined recursively from ARGS.  Each symbol from
 `%1' through `%9' that appears in ARGS is treated as a positional argument.
@@ -333,21 +338,26 @@ Instead of:
   (lambda (a _ c &rest d)
     (if a c (cadr d)))
 you can use this macro and write:
-  (fn!! (if %1 %3 (cadr %*)))
+  (fn! (if %1 %3 (cadr %*)))
 which expands to:
   (lambda (%1 _%2 %3 &rest %*)
     (if %1 %3 (cadr %*)))
 This macro was adapted from llama.el (see https://git.sr.ht/~tarsius/llama),
 minus font-locking, the outer function call, and minor optimizations."
   `(lambda ,(let ((argv (make-vector 10 nil)))
-         (radian--fn-crawl args argv)
-         `(,@(let ((n 0))
-               (mapcar (lambda (sym)
-                         (cl-incf n)
-                         (or sym (intern (format "_%%%s" n))))
-                       (reverse (seq-drop-while
-                                 #'null (reverse (seq-subseq argv 1))))))
-           ,@(and (aref argv 0) '(&rest %*))))
+              (radian--fn-crawl args argv)
+              `(,@(let ((i (1- (length argv)))
+                        (n -1)
+                        sym arglist)
+                    (while (> i 0)
+                      (setq sym (aref argv i))
+                      (unless (and (= n -1) (null sym))
+                        (cl-incf n)
+                        (push (or sym (intern (format "_%%%d" (1+ n))))
+                              arglist))
+                      (cl-decf i))
+                    arglist)
+                ,@(and (aref argv 0) '(&rest %*))))
      ,@args))
 
 (defmacro cmd! (&rest body)
@@ -989,19 +999,19 @@ Just wrap code in leaf block, no `require' it."
 ;;
 ;;; Backports
 
-(eval-unless! *EMACS28+
-
 ;; `format-spec' wasn't autoloaded until 28
-(autoload #'format-spec "format-spec")
+(unless (fboundp 'format-spec)
+  (autoload #'format-spec "format-spec"))
 
-(defun ensure-list (object)
-  "Return OBJECT as a list.
-If OBJECT is already a list, return OBJECT itself.  If it's
-not a list, return a one-element list containing OBJECT."
-  (declare (pure t) (side-effect-free t))
-  (if (listp object)
-      object
-    (list object))))
+(unless (fboundp 'ensure-list)
+  (defun ensure-list (object)
+    "Return OBJECT as a list.
+  If OBJECT is already a list, return OBJECT itself.  If it's
+  not a list, return a one-element list containing OBJECT."
+    (declare (pure t) (side-effect-free t))
+    (if (listp object)
+        object
+      (list object))))
 
 ;; Local Variables:
 ;; indent-tabs-mode: nil
