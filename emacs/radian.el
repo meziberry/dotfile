@@ -3044,7 +3044,7 @@ and cannot run in."
                     #'lsp-bridge-find-references #'xref-find-references))
   ("C-M-m" . lsp-bridge-find-impl)
   (radian-comma-keymap ("te" . lsp-bridge-toggle-english-helper))
-  (project-current)
+
   :config
   ;; Mix `lsp-bridge' `xref' and `dumb-jump'.
   (defun lsp-bridge-jump ()
@@ -5808,7 +5808,7 @@ spaces."
 
 (dolist (hook '(window-configuration-change-hook
                 window-size-change-functions
-                after-setting-font-hookn
+                after-setting-font-hook
                 display-line-numbers-mode-hook))
   (add-hook hook #'xah-show-formfeed-as-line))
 
